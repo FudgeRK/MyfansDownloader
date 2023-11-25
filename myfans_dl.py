@@ -1,4 +1,5 @@
 import os
+import time
 import datetime
 import requests
 import random
@@ -39,6 +40,7 @@ def DL_File(session, m3u8_url, output_file):
             print('----------------------------------------------------------------')
 
         # Use FFmpeg to download and convert the .m3u8 playlist to .mp4
+        print("\n")
         subprocess.run(["ffmpeg", "-i", m3u8_url, "-c:v", "copy", "-c:a", "copy", "-loglevel", "warning", "-stats", output_file], check=True)
         print('----------------------------------------------------------------')
         print(f"Downloaded and converted to {output_file}")
@@ -132,6 +134,7 @@ if input_option == 'file':
                         characters = string.ascii_lowercase + string.digits
                         random_string = ''.join(random.choice(characters) for _ in range(6))
                         mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                        time.sleep(3)
                         future = executor.submit(DL_File, session, m3u8_url, mp4_output_file)
                         future.add_done_callback(lambda x: remove_line_with_id(input_file_path, input_post_id) if x.result() else None)
                     else:
