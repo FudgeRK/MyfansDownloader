@@ -1,5 +1,4 @@
 import os
-import time
 import datetime
 import requests
 import random
@@ -27,7 +26,7 @@ def remove_line_with_id(input_file_path, post_id):
                 file.write(line)
 
 # Function to download and convert the .m3u8 playlist to .mp4 using FFmpeg
-def DL_File(session, m3u8_url, output_file):
+def DL_File(session, m3u8_url, output_file, input_post_id):
     try:
         # Check if the output file already exists
         if os.path.isfile(output_file):
@@ -45,6 +44,11 @@ def DL_File(session, m3u8_url, output_file):
         print('----------------------------------------------------------------')
         print(f"Downloaded and converted to {output_file}")
         print('----------------------------------------------------------------')
+
+        # Remove the line with the post ID from the input file
+        remove_line_with_id(input_file_path, input_post_id)
+        print(f"Removed post ID {input_post_id} from the input file.")
+
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error while downloading and converting .m3u8 to .mp4: {e}")
@@ -83,69 +87,67 @@ if input_option == 'file':
     selected_resolution = 'fhd'
     original_resolution = selected_resolution
 
-    # Create a thread pool for concurrent downloading and conversion
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        # Process each post ID concurrently
-        for input_post_id in post_ids:
-            url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
-            headers = read_headers_from_file("header.txt")
-            response = session.get(url, headers=headers)
-
-            if response.status_code == 200:
-                data = response.json()
-                main_videos = data['videos']['main']
-                name_creator = data['user']['username']
-
-                if main_videos:
-                    # Check if the selected resolution is available
-                    video_url = None
+    # Process each post ID concurrently
+    for input_post_id in post_ids:
+        url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
+        headers = read_headers_from_file("header.txt")
+        response = session.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            main_videos = data['videos']['main']
+            name_creator = data['user']['username']
+            if main_videos:
+                # Check if the selected resolution is available
+                video_url = None
+                for video in main_videos:
+                    if video["resolution"] == selected_resolution:
+                        video_url = video["url"]
+                        break
+                if not video_url:
+                    # If the selected resolution is not available, switch to 480p
+                    if selected_resolution == "fhd":
+                        selected_resolution = "sd"
+                        print(f"not found the FHD file, switching to {selected_resolution} resolution.")
+                        
+                    # Try to find the new resolution
                     for video in main_videos:
                         if video["resolution"] == selected_resolution:
                             video_url = video["url"]
                             break
-
-                    if not video_url:
-                        # If the selected resolution is not available, switch to 480p
-                        if selected_resolution == "fhd":
-                            selected_resolution = "sd"
-                            print(f"not found the FHD file, switching to {selected_resolution} resolution.")
-                        elif selected_resolution == "sd":
-                            selected_resolution = "fhd"
-                            print(f"not found the file, switching to {selected_resolution} resolution.")
-
-                        # Try to find the new resolution
-                        for video in main_videos:
-                            if video["resolution"] == selected_resolution:
-                                video_url = video["url"]
-                                break
-
-                    if video_url:
-                        # Modify the URL based on the selected resolution
-                        video_base_url, video_extension = os.path.splitext(video_url)
-                        if selected_resolution == "fhd":
-                            target_resolution = "1080p"
-                        elif selected_resolution == "sd":
-                            target_resolution = "480p"
-
-                        # Add /{target_resolution}.m3u8 to the video URL
-                        m3u8_url = f"{video_base_url}/{target_resolution}.m3u8"
-
-                        # Download and convert the .m3u8 playlist to .mp4 concurrently
-                        characters = string.ascii_lowercase + string.digits
-                        random_string = ''.join(random.choice(characters) for _ in range(6))
+                            
+                if video_url:
+                    # Modify the URL based on the selected resolution
+                    video_base_url, video_extension = os.path.splitext(video_url)
+                    if selected_resolution == "fhd":
+                        target_resolution = "1080p"
+                    elif selected_resolution == "sd":
+                        target_resolution = "480p"
+                        
+                    # Add /{target_resolution}.m3u8 to the video URL
+                    m3u8_url = f"{video_base_url}/{target_resolution}.m3u8"
+                    
+                    # Download and convert the .m3u8 playlist to .mp4 concurrently
+                    characters = string.ascii_lowercase + string.digits
+                    random_string = ''.join(random.choice(characters) for _ in range(6))
+                    
+                    # Check the response status of the m3u8_url
+                    m3u8_response = session.get(m3u8_url, headers=headers)
+                    if m3u8_response.status_code == 200:
                         mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
-                        time.sleep(3)
-                        future = executor.submit(DL_File, session, m3u8_url, mp4_output_file)
-                        future.add_done_callback(lambda x: remove_line_with_id(input_file_path, input_post_id) if x.result() else None)
+                        if DL_File(session, m3u8_url, mp4_output_file, input_post_id):
+                            pass
                     else:
-                        print(f"No video URL found for resolution '{selected_resolution}' in post ID {input_post_id}.")
+                        m3u8_url = f"{video_base_url}/360p.m3u8"
+                        mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                        if DL_File(session, m3u8_url, mp4_output_file, input_post_id):
+                            pass
                 else:
-                    print(f"No videos found or You don't have access this file")
+                    print(f"No video URL found for resolution '{selected_resolution}' in post ID {input_post_id}.")
             else:
-                print(f"Request failed for post ID {input_post_id} with status code:", response.status_code)
-                  
+                print(f"No videos found or You don't have access this file")
+        else:
+            print(f"Request failed for post ID {input_post_id} with status code:", response.status_code)
 else:
-
     input_post_id = input("Enter the post ID: ")
     post_ids = [input_post_id]
     selected_resolution = 'fhd'
@@ -174,9 +176,6 @@ else:
                     if selected_resolution == "fhd":
                         selected_resolution = "sd"
                         print(f"not found the FHD file, switching to {selected_resolution} resolution.")
-                    elif selected_resolution == "sd":
-                        selected_resolution = "fhd"
-                        print(f"not found the file, switching to {selected_resolution} resolution.")
 
                     # Try to find the new resolution
                     for video in main_videos:
@@ -199,9 +198,18 @@ else:
                     if video_url:
                         characters = string.ascii_lowercase + string.digits
                         random_string = ''.join(random.choice(characters) for _ in range(6))
-                        mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
-                        if DL_File(session, m3u8_url, mp4_output_file):
-                            pass
+                    
+                        # Check the response status of the m3u8_url
+                        m3u8_response = session.get(m3u8_url, headers=headers)
+                        if m3u8_response.status_code == 200:
+                            mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                            if DL_File(session, m3u8_url, mp4_output_file, input_post_id):
+                                pass
+                        else:
+                            m3u8_url = f"{video_base_url}/360p.m3u8"
+                            mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                            if DL_File(session, m3u8_url, mp4_output_file, input_post_id):
+                                pass
                     else:
                         print(f"No video URL found for resolution '{selected_resolution}'.")
             else:
