@@ -3,6 +3,7 @@ import json
 import os
 import configparser
 
+# Function to read headers from a file and store them in a dictionary
 def read_headers_from_file(filename):
     headers = {}
     with open(filename, 'r') as file:
@@ -10,6 +11,13 @@ def read_headers_from_file(filename):
             key, value = line.strip().split(': ')
             headers[key.lower()] = value
     return headers
+
+# Function to get posts for a specific page
+def get_posts_for_page(base_url, page, headers):
+    url = base_url + str(page)
+    response = requests.get(url, headers=headers)
+    json_data = response.json()
+    return json_data.get("data", [])
 
 # Check if the configuration file exists
 config_file_path = 'config.ini'
@@ -43,7 +51,7 @@ new_json_data = response.json()
 user_id = new_json_data.get("id")
 
 # Define the initial page and base URL
-page = 0
+page = 1
 if user_id:
     base_url = f"https://api.myfans.jp/api/v2/users/{user_id}/posts?sort_key=publish_start_at&page="
 else:
@@ -65,17 +73,16 @@ image_posts = []
 all_posts = []
 
 while True:
-    url = base_url + str(page)
-    response = requests.get(url, headers=headers)
-    json_data = response.json()
-
+    # Retrieve data for the current page
+    page_data = get_posts_for_page(base_url, page, headers)
+    
     # Check if "pagination" "next" is null
-    if json_data.get("pagination", {}).get("next") is None:
-        break  # Exit the loop if "next" is null
+    if not page_data:
+        break  # Exit the loop if there's no data on the page
+    page += 1
 
     # Append the posts from the current page to the respective lists
-    posts = json_data.get("data", [])
-    for post in posts:
+    for post in page_data:
         post_kind = post.get("kind")
         if post_kind == "video":
             video_posts.append(post)
@@ -83,11 +90,8 @@ while True:
             image_posts.append(post)
         all_posts.append(post)
 
-    # Move to the next page
-    page += 1
-
-    # Iterate through the posts in the JSON data
-    for post in json_data.get("data", []):
+    # Iterate through the posts in the JSON data for the current page
+    for post in page_data:
         post_id = post.get("id")
         post_kind = post.get("kind")
         humanized_publish_start_at = post.get("humanized_publish_start_at")
