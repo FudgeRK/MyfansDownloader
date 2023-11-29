@@ -18,15 +18,6 @@ def read_headers_from_file(filename):
             headers[key.lower()] = value
     return headers
 
-# Function to remove a line with a specified ID from the input file
-def remove_line_with_id(input_file_path, post_id):
-    with open(input_file_path, 'r') as file:
-        lines = file.readlines()
-    with open(input_file_path, 'w') as file:
-        for line in lines:
-            if line.strip() != post_id:
-                file.write(line)
-
 # Function to download and convert the .m3u8 playlist to .mp4 using FFmpeg
 def DL_File(session, m3u8_url, output_file, input_post_id, output_file_name):
     try:
@@ -60,10 +51,6 @@ def DL_File(session, m3u8_url, output_file, input_post_id, output_file_name):
         print('----------------------------------------------------------------')
         print(f"Downloaded and converted to {output_file}")
         print('----------------------------------------------------------------')
-
-        # Remove the line with the post ID from the input file
-        remove_line_with_id(input_file_path, input_post_id)
-        print(f"Removed post ID {input_post_id} from the input file.")
 
         return True
     except subprocess.CalledProcessError as e:
@@ -151,21 +138,21 @@ if input_option == 'file':
                         if video_url and m3u8_response.status_code == 200 and target_resolution == "1080p":
                             m3u8_url = f"{video_base_url}/1080p.m3u8"
                             mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
-                            # print(f"This video is 1080p")
+                            print(f"This video is 1080p")
                             future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4")
                             futures.append(future)
                             
                         elif video_url and m3u8_response.status_code == 200 and target_resolution == "480p":
                             m3u8_url = f"{video_base_url}/480p.m3u8"
                             mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
-                            # print(f"This video is 480p")
+                            print(f"This video is 480p")
                             future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4")
                             futures.append(future)
                             
                         else:
                             m3u8_url = f"{video_base_url}/360p.m3u8"
                             mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
-                            # print(f"This video is 360p")
+                            print(f"This video is 360p")
                             future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4")
                             futures.append(future)
                                 
@@ -181,6 +168,7 @@ if input_option == 'file':
     download_videos_concurrently(session, post_ids, selected_resolution, output_dir)
 
 else:
+    
     input_post_id = input("Enter the post ID: ")
     post_ids = [input_post_id]
     selected_resolution = 'fhd'
@@ -204,16 +192,19 @@ else:
                     if video["resolution"] == 'fhd':
                         fhd_video = video
                     elif video["resolution"] == 'sd':
-                        sd_video 
+                        sd_video = video
+                        
                 # Prioritize 'fhd' if available, otherwise use 'sd'
                 if fhd_video:
                     selected_resolution = 'fhd'
                     selected_video = fhd_video
                 elif sd_video:
                     selected_resolution = 'sd'
-                    selected_video = s
+                    selected_video = sd_video
+                    
                 # Continue with the selected resolution
-                video_url = selected_video
+                video_url = selected_video["url"]
+                
                 # Modify the URL based on the selected resolution
                 video_base_url, video_extension = os.path.splitext(video_url)
                 if selected_resolution == "fhd":
@@ -229,18 +220,21 @@ else:
                 if video_url and m3u8_response.status_code == 200 and target_resolution == "1080p":
                     m3u8_url = f"{video_base_url}/1080p.m3u8"
                     mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                    print(f"This video is 1080p")
                     if DL_File(session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4"):
                         pass
                         
                 elif video_url and m3u8_response.status_code == 200 and target_resolution == "480p":
                     m3u8_url = f"{video_base_url}/480p.m3u8"
                     mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                    print(f"This video is 480p")
                     if DL_File(session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4"):
                         pass
                         
                 else:
                     m3u8_url = f"{video_base_url}/360p.m3u8"
                     mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                    print(f"This video is 360p")
                     if DL_File(session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4"):
                         pass
 
