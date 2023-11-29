@@ -125,6 +125,7 @@ if choice == "3":
 # Export data
 export_id_choice = input("Do you want to export 'ID'? (Yes|y/No|n): ").strip().lower()
 if export_id_choice == "yes" or export_id_choice == "y":
+    save_choice = input("Do you want to save only free posts? (Yes|y/No|n): ").strip().lower()
 
     if choice == "1" and video_posts:
         filename = os.path.join(output_dir, f"{name_creator}_video_id.txt")
@@ -137,6 +138,8 @@ if export_id_choice == "yes" or export_id_choice == "y":
         with open(filename, "w") as video_posts_id_file:
             for post in video_posts:
                 post_id = post.get("id")
+                if (save_choice == "yes" or save_choice == "y") and not post.get("free"):
+                    continue
                 video_posts_id_file.write(f"{post_id}\n")
         print(f"Video data exported to {filename}")
     else:
@@ -153,6 +156,8 @@ if export_id_choice == "yes" or export_id_choice == "y":
         with open(filename, "w") as image_posts_id_file:
             for post in image_posts:
                 post_id = post.get("id")
+                if (save_choice == "yes" or save_choice == "y") and not post.get("free"):
+                    continue
                 image_posts_id_file.write(f"{post_id}\n")
         print(f"Image data exported to {filename}")
     else:
@@ -169,6 +174,8 @@ if export_id_choice == "yes" or export_id_choice == "y":
         with open(filename, "w") as all_posts_id_file:
             for post in all_posts:
                 post_id = post.get("id")
+                if (save_choice == "yes" or save_choice == "y") and not post.get("free"):
+                    continue
                 all_posts_id_file.write(f"{post_id}\n")
         print(f"All data exported to {filename}")
     else:
