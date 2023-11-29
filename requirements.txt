@@ -1,4 +1,0 @@
-requests
-ffmpeg-python
-concurrent.futures
-configparser
