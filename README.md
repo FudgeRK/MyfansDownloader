@@ -20,7 +20,7 @@ Can be found from _mfans_token= or Token token=</br></br>
 ♦️ reqiure FFmpeg</br></br>
 
 <h2>How to use</h2>
-🚩 Export all post id to .txt
+🚩 Export all post id to .txt or choose only free post
 
 🚩 After that use myfans_dl download all file (require .txt file) 
 or single file (require post id)
