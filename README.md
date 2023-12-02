@@ -20,9 +20,9 @@ Can be found from _mfans_token= or Token token=</br></br>
 ♦️ reqiure FFmpeg</br></br>
 
 <h2>How to use</h2>
-🚩 Export all post id or choose only free post to .txt
+🚩 Export all post id or choose only free post to .txt with myfans_scrap.py
 
-🚩 After that use myfans_dl download all file (require .txt file) 
+🚩 After that use myfans_dl.py download all file (require .txt file) 
 or single file (require post id)
 
 
