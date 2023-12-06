@@ -127,7 +127,7 @@ export_id_choice = input("Do you want to export 'ID'? (Yes|y/No|n): ").strip().l
 if export_id_choice == "yes" or export_id_choice == "y":
     save_choice = input("Do you want to save only free posts? (Yes|y/No|n): ").strip().lower()
 
-    if choice == "1" and video_posts:
+    if (choice == "1" or choice == "3") and video_posts:
         filename = os.path.join(output_dir, f"{name_creator}_video_id.txt")
         if os.path.isfile(filename):
             base, ext = os.path.splitext(filename)
@@ -142,10 +142,8 @@ if export_id_choice == "yes" or export_id_choice == "y":
                     continue
                 video_posts_id_file.write(f"{post_id}\n")
         print(f"Video data exported to {filename}")
-    else:
-        exit()
 
-    if choice == "2" and image_posts:
+    if (choice == "2" or choice == "3") and image_posts:
         filename = os.path.join(output_dir, f"{name_creator}_image_id.txt")
         if os.path.isfile(filename):
             base, ext = os.path.splitext(filename)
@@ -160,25 +158,5 @@ if export_id_choice == "yes" or export_id_choice == "y":
                     continue
                 image_posts_id_file.write(f"{post_id}\n")
         print(f"Image data exported to {filename}")
-    else:
-        exit()
-
-    if choice == "3" and all_posts:
-        filename = os.path.join(output_dir, f"{name_creator}_all_id.txt")
-        if os.path.isfile(filename):
-            base, ext = os.path.splitext(filename)
-            count = 1
-            while os.path.isfile(filename):
-                filename = os.path.join(output_dir, f"{base}_{count}{ext}")
-                count += 1
-        with open(filename, "w") as all_posts_id_file:
-            for post in all_posts:
-                post_id = post.get("id")
-                if (save_choice == "yes" or save_choice == "y") and not post.get("free"):
-                    continue
-                all_posts_id_file.write(f"{post_id}\n")
-        print(f"All data exported to {filename}")
-    else:
-        exit()
 else:
     exit()
