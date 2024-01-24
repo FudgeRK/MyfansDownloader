@@ -19,17 +19,16 @@ def read_headers_from_file(filename):
     return headers
 
 # Function to download and convert the .m3u8 playlist to .mp4 using FFmpeg
-def DL_File(session, m3u8_url, output_file, input_post_id, output_file_name):
+def DL_File(session, m3u8_url, output_file, input_post_id, output_folder, output_file_name):
     try:
+        # Create the output folder if it doesn't exist
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+        
         # Check if the output file already exists
-        if os.path.isfile(output_file):
-            # If it exists, rename the file by adding a timestamp to its name
-            timestamp = datetime.datetime.now().strftime("%H%M%S")
-            base_name, extension = os.path.splitext(output_file)
-            new_output_file = f"{base_name}_{timestamp}{extension}"
-            os.rename(output_file, new_output_file)
-            print(f"Renamed existing file to {new_output_file}")
-            print('----------------------------------------------------------------')
+        if os.path.exists(output_file):
+            print(f"File {output_file} already exists. Skipping download.")
+            return True
 
         # Use FFmpeg to download and convert the .m3u8 playlist to .mp4
         print("\n")
@@ -56,7 +55,7 @@ def DL_File(session, m3u8_url, output_file, input_post_id, output_file_name):
     except subprocess.CalledProcessError as e:
         print(f"Error while downloading and converting .m3u8 to .mp4: {e}")
         return False
-        
+
 # Create a session with custom headers
 session = requests.Session()
 
@@ -133,27 +132,29 @@ if input_option == 'file':
 
                         m3u8_url = f"{video_base_url}/{target_resolution}.m3u8"
                         m3u8_response = session.get(m3u8_url, headers=headers)
-                        characters = string.ascii_lowercase + string.digits
-                        random_string = ''.join(random.choice(characters) for _ in range(6))
+                        
                         if video_url and m3u8_response.status_code == 200 and target_resolution == "1080p":
                             m3u8_url = f"{video_base_url}/1080p.m3u8"
-                            mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                            output_folder = os.path.join(output_dir, name_creator)
+                            mp4_output_file = os.path.join(output_folder, f"{input_post_id}.mp4")
                             print(f"This video is 1080p")
-                            future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4")
+                            future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, output_folder, f"{input_post_id}.mp4")
                             futures.append(future)
                             
                         elif video_url and m3u8_response.status_code == 200 and target_resolution == "480p":
                             m3u8_url = f"{video_base_url}/480p.m3u8"
-                            mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                            output_folder = os.path.join(output_dir, name_creator)
+                            mp4_output_file = os.path.join(output_folder, f"{input_post_id}.mp4")
                             print(f"This video is 480p")
-                            future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4")
+                            future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, output_folder, f"{input_post_id}.mp4")
                             futures.append(future)
                             
                         else:
                             m3u8_url = f"{video_base_url}/360p.m3u8"
-                            mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                            output_folder = os.path.join(output_dir, name_creator)
+                            mp4_output_file = os.path.join(output_folder, f"{input_post_id}.mp4")
                             print(f"This video is 360p")
-                            future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4")
+                            future = executor.submit(DL_File, session, m3u8_url, mp4_output_file, input_post_id, output_folder, f"{input_post_id}.mp4")
                             futures.append(future)
                                 
                     else:
@@ -215,27 +216,28 @@ else:
                 # Add /{target_resolution}.m3u8 to the video URL
                 m3u8_url = f"{video_base_url}/{target_resolution}.m3u8"
                 m3u8_response = session.get(m3u8_url, headers=headers)
-                characters = string.ascii_lowercase + string.digits
-                random_string = ''.join(random.choice(characters) for _ in range(6))
+                
+                output_folder = os.path.join(output_dir, name_creator)
+
                 if video_url and m3u8_response.status_code == 200 and target_resolution == "1080p":
                     m3u8_url = f"{video_base_url}/1080p.m3u8"
-                    mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                    mp4_output_file = os.path.join(output_folder, f"{input_post_id}.mp4")
                     print(f"This video is 1080p")
-                    if DL_File(session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4"):
+                    if DL_File(session, m3u8_url, mp4_output_file, input_post_id, output_folder, f"{input_post_id}.mp4"):
                         pass
                         
                 elif video_url and m3u8_response.status_code == 200 and target_resolution == "480p":
                     m3u8_url = f"{video_base_url}/480p.m3u8"
-                    mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                    mp4_output_file = os.path.join(output_folder, f"{input_post_id}.mp4")
                     print(f"This video is 480p")
-                    if DL_File(session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4"):
+                    if DL_File(session, m3u8_url, mp4_output_file, input_post_id, output_folder, f"{input_post_id}.mp4"):
                         pass
                         
                 else:
                     m3u8_url = f"{video_base_url}/360p.m3u8"
-                    mp4_output_file = os.path.join(output_dir, f"{name_creator}_video_{random_string}.mp4")
+                    mp4_output_file = os.path.join(output_folder, f"{input_post_id}.mp4")
                     print(f"This video is 360p")
-                    if DL_File(session, m3u8_url, mp4_output_file, input_post_id, f"{name_creator}_video_{random_string}.mp4"):
+                    if DL_File(session, m3u8_url, mp4_output_file, input_post_id, output_folder, f"{input_post_id}.mp4"):
                         pass
 
             else:
