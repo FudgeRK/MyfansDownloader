@@ -12,13 +12,13 @@ Auto switch video quality (1080P is base) if not found</br></br>
 |Videos| 360P            | ✅    |
 |Images| All          | ✅    |
 <h2>Note</h2>
-♦️ set the token in the header.txt file. (if it's free no require)</br>
+♦️ set the token in the header.txt file. (if you want download free content no require)</br>
 from cookies on the website myfans.jp.</br></br>
 
 ![Screenshot 2023-11-30 023059](https://github.com/FudgeRK/MyfansVideoDownload/assets/30218389/d1beaf05-bdd7-4ee9-8799-fa7590fce79a)
 ![Screenshot 2023-11-30 022826](https://github.com/FudgeRK/MyfansVideoDownload/assets/30218389/04357ec0-b076-4372-8dd1-31f2b9602901)
 Can be found from _mfans_token= or Token token=</br></br>
-♦️ This code run base on python 3.10.8</br>
+♦️ This code run base on python version >= 3.8</br>
 ♦️ reqiure FFmpeg</br></br>
 
 <h2>How to use</h2>
