@@ -22,10 +22,15 @@ Can be found from _mfans_token= or Token token=</br></br>
 ♦️ reqiure FFmpeg</br></br>
 
 <h2>How to use</h2>
-🚩 Export all post id or choose only free post to .txt with myfans_scrap.py.</br>
-🚩 Use myfans_dl.py download all file (require .txt file) 
+run python
+
+```
+python main.py
+```
+1. Scrap all post id to .txt(if you want to download all videos)</br>
+2. To download all video files (require .txt file)
 or single file (require post id).</br>
-🚩 Use myfans_image_dl download all picture by type name creator (no require post id)
+3. To download all pictures just type name of creator (no require post id)
 
 <h2>Special Thanks</h2>
 Shenggang
