@@ -12,7 +12,7 @@ Auto switch video quality (1080P is base) if not found</br></br>
 |Videos| 360P            | ✅    |
 |Images| All          | ✅    |
 <h2>Note</h2>
-♦️ set the token in the header.txt file.
+♦️ set the token in the header.txt file. (if it's free no require)</br>
 from cookies on the website myfans.jp.</br></br>
 
 ![Screenshot 2023-11-30 023059](https://github.com/FudgeRK/MyfansVideoDownload/assets/30218389/d1beaf05-bdd7-4ee9-8799-fa7590fce79a)
