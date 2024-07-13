@@ -22,7 +22,7 @@ def main():
     elif choice == "2":
         option2()
     elif choice == "3":
-        option2()    
+        option3()    
     else:
         print("Invalid choice. Please enter 1, 2 or 3")
 
