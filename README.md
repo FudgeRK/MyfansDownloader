@@ -21,6 +21,12 @@ Can be found from _mfans_token= or Token token=</br></br>
 ♦️ This code run base on python version >= 3.8</br>
 ♦️ reqiure FFmpeg</br></br>
 
+<h2>Tutorial video</h2>
+
+<a href="https://vimeo.com/990745787" target="_blank"><img src="https://i.vimeocdn.com/video/1906551049-edd0aa942beaa0f83af9e3c04e3aba98d51253b81bf837967309ec1fb7cac618-d?mw=900&q=85" 
+alt="Tutorial video" width="600" height="300" /></a>
+
+
 <h2>How to use</h2>
 run python
 
