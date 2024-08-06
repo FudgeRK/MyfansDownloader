@@ -40,18 +40,15 @@ def DL_File(session, m3u8_url, output_file, input_post_id, output_folder, output
             print(f"File {output_file} already exists. Skipping download.")
             return True
 
-        print("\n")
-        process = subprocess.Popen(["ffmpeg", "-i", m3u8_url, "-c:v", "copy", "-c:a", "copy", "-loglevel", "warning", "-stats", output_file])
-        spinner = "|/-\\"
-        spinner_index = 0
-        while process.poll() is None:
-            sys.stdout.write("\r" + "Downloading... " + spinner[spinner_index])
-            sys.stdout.flush()
-            spinner_index = (spinner_index + 1) % len(spinner)
-            time.sleep(0.1)
-        
-        sys.stdout.write("\r" + " " * 50 + "\r")
-        sys.stdout.flush()
+        process = subprocess.Popen(["ffmpeg", "-i", m3u8_url, "-c:v", "copy", "-c:a", "copy", "-loglevel", "error", "-stats", output_file], stderr=subprocess.PIPE, universal_newlines=True)
+
+        while True:
+            output = process.stderr.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                print(output.strip())
+        process.wait()
         
         print('----------------------------------------------------------------')
         print(f"Downloaded and converted to {output_file}")
