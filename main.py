@@ -1,4 +1,5 @@
 import subprocess
+from scripts.check_ffmpeg import *
 
 def option1():
     subprocess.run(["python", "scripts/myfans_scrap.py"])
@@ -22,7 +23,7 @@ def main():
     elif choice == "2":
         option2()
     elif choice == "3":
-        option3()    
+        option3()
     else:
         print("Invalid choice. Please enter 1, 2 or 3")
 
