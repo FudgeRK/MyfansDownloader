@@ -1,8 +1,7 @@
 import sys
 import subprocess
 
-from helpers.deps import install_requirements, check_python_version
-from scripts.check_ffmpeg import *
+from helpers.deps import install_requirements, check_python_version, check_ffmpeg_installed
 
 
 def option1():
@@ -18,7 +17,8 @@ def option3():
 
 
 def main():
-    if not install_requirements():
+    # Check if the required packages are installed and if ffmpeg is installed.
+    if not install_requirements() and check_ffmpeg_installed():
         sys.exit(1)
 
     options = {
