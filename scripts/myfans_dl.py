@@ -80,7 +80,7 @@ def main():
         while True:
             input_option = input("Choose an option (1 = .txt file, 2 = post id, 0 = go back): ").strip().lower()
             if input_option == '0':
-                subprocess.run(["python", "./main.py"])
+                subprocess.run([sys.executable, "./main.py"])
             elif input_option == '1':
                 txt_files = list_txt_files(output_dir)
                 if not txt_files:

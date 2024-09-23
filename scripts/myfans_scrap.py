@@ -1,3 +1,5 @@
+import sys
+
 import requests
 import json
 import os
@@ -52,7 +54,7 @@ output_dir = get_output_dir(config_file_path)
 while True:
     name_creator = input("Enter a name creator (no require @) or type '0' to go back: ")
     if name_creator.lower() == '0':
-        subprocess.run(["python", "./main.py"])
+        subprocess.run([sys.executable, "./main.py"])
         exit()
     new_base_url = f"https://api.myfans.jp/api/v2/users/show_by_username?username={name_creator}"
     headers = read_headers_from_file("header.txt")

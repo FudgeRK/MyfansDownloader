@@ -1,14 +1,15 @@
+import sys
 import subprocess
 from scripts.check_ffmpeg import *
 
 def option1():
-    subprocess.run(["python", "scripts/myfans_scrap.py"])
+    subprocess.run([sys.executable, "scripts/myfans_scrap.py"])
 
 def option2():
-    subprocess.run(["python", "scripts/myfans_dl.py"])
+    subprocess.run([sys.executable, "scripts/myfans_dl.py"])
     
 def option3():
-    subprocess.run(["python", "scripts/myfans_image_dl.py"])
+    subprocess.run([sys.executable, "scripts/myfans_image_dl.py"])
 
 def main():
     print("Choose an option:")
