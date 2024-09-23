@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from helpers.prompt import prompt_yes_no
 
 
 def check_python_version():
@@ -42,8 +43,7 @@ def _list_missing_requirements(requirements: list):
 def _prompt_install_missing(requirements: list):
     if requirements:
         _list_missing_requirements(requirements)
-        choice = input("Do you want to automatically install packages that are not installed? (Yes|y/No|n): ").strip().lower()
-        if choice in ('yes', 'y'):
+        if prompt_yes_no("Do you want to automatically install packages that are not installed?"):
             _install_missing_requirements(requirements)
         else:
             print("There are packages not installed. Please install them manually.")
