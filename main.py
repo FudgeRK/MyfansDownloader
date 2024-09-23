@@ -1,5 +1,7 @@
 import sys
 import subprocess
+
+from helpers.deps import install_requirements, check_python_version
 from scripts.check_ffmpeg import *
 
 
@@ -16,6 +18,9 @@ def option3():
 
 
 def main():
+    if not install_requirements():
+        sys.exit(1)
+
     options = {
         "1": option1,
         "2": option2,
@@ -37,4 +42,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if check_python_version():
+        main()
