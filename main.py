@@ -18,7 +18,7 @@ def option3():
 
 def main():
     # Check if the required packages are installed and if ffmpeg is installed.
-    if not install_requirements() and check_ffmpeg_installed():
+    if not install_requirements() or not check_ffmpeg_installed():
         sys.exit(1)
 
     options = {
