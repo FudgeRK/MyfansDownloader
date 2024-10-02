@@ -28,8 +28,14 @@ alt="Tutorial video" width="600" height="300" /></a>
 
 
 <h2>How to use</h2>
-run python
+Use your system's terminal</br>
+Go to the main folder of myfans downloader</br>
+first run
 
+```
+pip install -r requirements.txt
+```
+Next
 ```
 python main.py
 ```
@@ -37,8 +43,10 @@ python main.py
 2. To download all video files (require .txt file)
 or single file (require post id).</br>
 3. To download all pictures just type name of creator (no require post id)
+   
+<h2>🤝 Contributing to Myfans Downloader</h2>
+Any kind of positive contribution is welcome! Please help the project improve by <a href="https://github.com/FudgeRK/MyfansDownloader/pulls" target="_self">opening a pull request</a> with your suggested changes!
 
 <h2>Special Thanks</h2>
-Shenggang
-
-
+<a href="https://github.com/Shenggang" target="_self">Shenggang</a></br>
+<a href="https://github.com/bluems" target="_self">bluems</a>
