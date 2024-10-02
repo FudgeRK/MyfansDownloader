@@ -10,6 +10,7 @@ Auto switch video quality (1080P is base) if not found</br></br>
 |Videos| no 720P on Official| ❓ |
 |Videos| 480P            | ✅    |
 |Videos| 360P            | ✅    |
+|Videos| back number video            | ❌    |
 |Images| All          | ✅    |
 <h2>Note</h2>
 ♦️ set the token in the header.txt file. (if you want download free content no require)</br>
