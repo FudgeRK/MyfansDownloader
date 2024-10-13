@@ -32,9 +32,11 @@ alt="Tutorial video" width="600" height="300" /></a>
 Use your system's terminal</br>
 Go to the main folder of myfans downloader</br>
 first run
+
 ```
 python main.py
 ```
+
 1. To download all video files or single file (require name of creator).</br>
 2. To download all pictures (require name of creator)
    
