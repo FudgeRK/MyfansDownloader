@@ -45,7 +45,7 @@ else:
 name_creator = input("Enter a name creator (no require @): ")
 
 
-save_path = output_dir+"/"+name_creator+"/"
+save_path = output_dir+"/"+name_creator+"/"+"images"+"/"
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
