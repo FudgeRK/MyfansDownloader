@@ -31,15 +31,34 @@ def DL_File(m3u8_url_download, output_file, input_post_id):
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
 
-        result = subprocess.run(
-            ["ffmpeg", "-n", "-i", m3u8_url_download, "-c:v", "copy", "-c:a", "copy", "-loglevel", "quiet", output_file],
+        # Step 1: Download as .ts file first
+        ts_file = output_file.replace('.mp4', '.ts')
+        
+        # Download with longer timeout since this is the network-heavy part
+        download_result = subprocess.run(
+            ["ffmpeg", "-n", "-i", m3u8_url_download, "-c", "copy", "-loglevel", "quiet", ts_file],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=30  
+            timeout=600  # 10 minutes for download
         )
 
-        return True
+        # Step 2: Convert to MP4 if download successful
+        if os.path.exists(ts_file):
+            convert_result = subprocess.run(
+                ["ffmpeg", "-i", ts_file, "-c", "copy", "-loglevel", "quiet", output_file],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=300  # 5 minutes for conversion
+            )
+            
+            # Clean up ts file after successful conversion
+            if os.path.exists(output_file):
+                os.remove(ts_file)
+                return True
+
+        return False
 
     except subprocess.TimeoutExpired:
         print(f"FFmpeg timed out for post ID {input_post_id}.")
@@ -51,7 +70,6 @@ def DL_File(m3u8_url_download, output_file, input_post_id):
     except Exception as e:
         print(f"Unexpected error for post ID {input_post_id}: {e}")
         return False
-
 
 def process_post_id(input_post_id, session, headers, selected_resolution, output_dir, filename_config, progress_bar=None):
     url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
