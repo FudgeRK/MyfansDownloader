@@ -280,7 +280,7 @@ def main():
             return
 
         selected_resolution = 'fhd'
-        download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config)
+        download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, max_workers)
 
     elif choice == '2':
         post_id = input("Enter the post ID to download: ")
