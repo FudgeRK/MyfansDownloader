@@ -44,5 +44,4 @@ python main.py
 Any kind of positive contribution is welcome! Please help the project improve by <a href="https://github.com/FudgeRK/MyfansDownloader/pulls" target="_self">opening a pull request</a> with your suggested changes!
 
 <h2>Special Thanks</h2>
-<a href="https://github.com/Shenggang" target="_self">Shenggang</a></br>
-<a href="https://github.com/bluems" target="_self">bluems</a>
+<a href="https://github.com/Shenggang" target="_self">Shenggang</a>, <a href="https://github.com/bluems" target="_self">bluems</a>, <a href="https://github.com/Serph91P" target="_self">Serph91P</a>, <a href="https://github.com/albertphil" target="_self">albertphil</a>
