@@ -2,3 +2,5 @@ requests
 Pillow
 tqdm
 m3u8
+typing-extensions
+urllib3

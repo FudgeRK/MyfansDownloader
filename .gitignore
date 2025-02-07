@@ -1,6 +1,5 @@
-
 /ffmpeg/
 /venv/
 /.idea/
-
 **/__pycache__/
+api_exploration_*.json

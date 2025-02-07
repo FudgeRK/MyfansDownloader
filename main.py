@@ -1,8 +1,6 @@
 import sys
 import subprocess
-
 from helpers.deps import install_requirements, check_python_version, check_ffmpeg_installed
-
 
 def option1():
     subprocess.run([sys.executable, "scripts/myfans_dl.py"])
@@ -31,7 +29,6 @@ def main():
         action()
     else:
         print("Invalid choice. Please enter 1 or 2")
-
 
 if __name__ == "__main__":
     if check_python_version():
