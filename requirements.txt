@@ -1,3 +1,4 @@
 requests
 Pillow
 tqdm
+m3u8
