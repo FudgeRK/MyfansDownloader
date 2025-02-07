@@ -216,28 +216,36 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
     if progress_bar:
         progress_bar.update(1)
 
-def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, max_workers=10):
+def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, max_workers=1):  # Changed to 1
+    """Download videos one at a time to avoid conflicts"""
     headers = read_headers_from_file("header.txt")
-    progress_bar = tqdm(total=len(post_ids), desc="Downloading videos", unit="video")
+    total_posts = len(post_ids)
+    print(f"\nStarting download of {total_posts} posts one at a time...")
+    
+    progress_bar = tqdm(total=total_posts, desc="Downloading videos", unit="video")
 
     def handle_download(input_post_id):
-        process_post_id(
-            input_post_id,
-            session,
-            headers,
-            selected_resolution,
-            output_dir,
-            filename_config,
-            progress_bar
-        )
+        try:
+            process_post_id(
+                input_post_id,
+                session,
+                headers,
+                selected_resolution,
+                output_dir,
+                filename_config,
+                progress_bar
+            )
+        except Exception as e:
+            print(f"\nError processing post {input_post_id}: {e}")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Use ThreadPoolExecutor with max_workers=1 to process one video at a time
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         futures = [executor.submit(handle_download, post_id) for post_id in post_ids]
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
             except Exception as e:
-                print(f"An error occurred during download: {e}")
+                print(f"\nAn error occurred during download: {e}")
 
     progress_bar.close()
     print("\nDownload process completed.")
