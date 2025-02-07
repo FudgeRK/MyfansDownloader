@@ -46,58 +46,55 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
             try:
                 print(f"Parsing M3U8 for post ID {input_post_id} (attempt {attempt+1}/{max_retries})...")
                 playlist = m3u8.load(m3u8_url_download)
-
                 if not playlist.segments:
                     print("No segments found in M3U8. Possible invalid URL or no access.")
                     return False
 
-                print(f"Found {len(playlist.segments)} segment(s) for post ID {input_post_id}. Downloading individually...")
+                print(f"Found {len(playlist.segments)} segment(s) for post ID {input_post_id}.")
+                print("Downloading individually...")
+
                 segment_files = []
-
-                # Attempt to determine the base URI for segments
-                if playlist.base_uri:
-                    base_uri = playlist.base_uri
-                else:
-                    # Fallback if base_uri is not set
-                    # We'll use the M3U8 URL minus the filename
-                    if '/' in m3u8_url_download:
-                        base_uri = m3u8_url_download.rsplit('/', 1)[0] + '/'
+                with tqdm(total=len(playlist.segments), desc="Segments", unit="seg") as seg_pbar:
+                    if playlist.base_uri:
+                        base_uri = playlist.base_uri
                     else:
-                        base_uri = m3u8_url_download
+                        if '/' in m3u8_url_download:
+                            base_uri = m3u8_url_download.rsplit('/', 1)[0] + '/'
+                        else:
+                            base_uri = m3u8_url_download
 
-                for i, segment in enumerate(playlist.segments):
-                    # If segment URI isn’t absolute, combine with base URL
-                    segment_url = segment.uri
-                    if not segment_uri_is_absolute(segment_url):
-                        segment_url = urljoin(base_uri, segment_url)
+                    for i, segment in enumerate(playlist.segments):
+                        segment_url = segment.uri
+                        if not segment_uri_is_absolute(segment_url):
+                            segment_url = urljoin(base_uri, segment_url)
 
-                    seg_path = os.path.join(temp_folder, f"segment_{i}.ts")
-                    success_download = False
+                        seg_path = os.path.join(temp_folder, f"segment_{i}.ts")
+                        success_download = False
 
-                    # Retry logic for each segment
-                    for seg_attempt in range(max_retries):
-                        try:
-                            with requests.get(segment_url, stream=True, timeout=120) as resp:
-                                resp.raise_for_status()
-                                with open(seg_path, "wb") as f:
-                                    for chunk in resp.iter_content(chunk_size=chunk_size):
-                                        if chunk:
-                                            f.write(chunk)
-                            success_download = True
-                            break
-                        except Exception as e:
-                            print(f"Error downloading segment {i} for post ID {input_post_id}: {e}")
-                            if seg_attempt < max_retries - 1:
-                                print(f"Retrying segment {i} in {retry_delay} seconds...")
-                                time.sleep(retry_delay)
+                        for seg_attempt in range(max_retries):
+                            try:
+                                with requests.get(segment_url, stream=True, timeout=120) as resp:
+                                    resp.raise_for_status()
+                                    with open(seg_path, "wb") as f:
+                                        for chunk in resp.iter_content(chunk_size=chunk_size):
+                                            if chunk:
+                                                f.write(chunk)
+                                success_download = True
+                                time.sleep(0.25)
+                                break
+                            except Exception as e:
+                                print(f"Error downloading segment {i} for post ID {input_post_id}: {e}")
+                                if seg_attempt < max_retries - 1:
+                                    print(f"Retrying segment {i} in {retry_delay} seconds...")
+                                    time.sleep(retry_delay)
 
-                    if not success_download:
-                        print(f"Segment {i} still failed after retries. Aborting.")
-                        return False
+                        if not success_download:
+                            print(f"Segment {i} still failed after retries. Aborting.")
+                            return False
 
-                    segment_files.append(seg_path)
+                        segment_files.append(seg_path)
+                        seg_pbar.update(1)
 
-                # Merge all segments into one TS file
                 with open(ts_file, 'wb') as outfile:
                     for seg_file in segment_files:
                         with open(seg_file, 'rb') as infile:
@@ -107,21 +104,17 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                     print("Merged TS file missing or empty. Aborting.")
                     return False
 
-                # Convert TS to MP4
                 try:
                     print(f"Converting merged TS to MP4 for post ID {input_post_id}...")
                     convert_result = subprocess.run(
                         ["ffmpeg", "-y", "-i", ts_file, "-c", "copy", output_file],
                         check=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
                         timeout=600
                     )
-                    print(f"FFmpeg stdout: {convert_result.stdout.decode('utf-8')}")
-                    print(f"FFmpeg stderr: {convert_result.stderr.decode('utf-8')}")
 
                     if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                        # Clean up segments and TS
                         os.remove(ts_file)
                         for seg_file in segment_files:
                             os.remove(seg_file)
@@ -132,8 +125,7 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                 except subprocess.TimeoutExpired:
                     print("FFmpeg conversion timed out.")
                 except subprocess.CalledProcessError as e:
-                    print(f"FFmpeg error: {e}")
-                    print(f"FFmpeg stderr: {e.stderr.decode('utf-8')}")
+                    print(f"FFmpeg error during conversion: {e}")
 
             except Exception as e:
                 print(f"Error processing M3U8 or merging segments for post ID {input_post_id}: {e}")
@@ -209,7 +201,10 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
 
-        full_output_path = os.path.join(output_folder, generate_filename(data, filename_config, output_folder))
+        full_output_path = os.path.join(
+            output_folder,
+            generate_filename(data, filename_config, output_folder)
+        )
         
         success = DL_File(m3u8_url_download, full_output_path, input_post_id)
         if not success:
@@ -223,15 +218,21 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
 
 def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, max_workers=10):
     headers = read_headers_from_file("header.txt")
-
     progress_bar = tqdm(total=len(post_ids), desc="Downloading videos", unit="video")
 
     def handle_download(input_post_id):
-        process_post_id(input_post_id, session, headers, selected_resolution, output_dir, filename_config, progress_bar)
+        process_post_id(
+            input_post_id,
+            session,
+            headers,
+            selected_resolution,
+            output_dir,
+            filename_config,
+            progress_bar
+        )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(handle_download, post_id) for post_id in post_ids]
-
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
@@ -313,12 +314,10 @@ def main():
 
     if choice == '1':
         base_url = f"https://api.myfans.jp/api/v2/users/{user_id}/posts?sort_key=publish_start_at&page="
-
         print("Fetching posts and collecting video posts...")
         video_posts = []
         page = 1
         headers = read_headers_from_file("header.txt")
-
         with tqdm(desc="Fetching pages") as pbar:
             while True:
                 try:
@@ -342,13 +341,12 @@ def main():
             print("No video posts found.")
             return
 
-        video_count = len(video_posts)
-
         print("Select which posts to download:")
         print("1. Free posts only")
         print("2. Subscribe posts only")
         print("3. All posts")
         save_choice = input("Enter your choice (1/2/3): ").strip()
+
         if save_choice == "1":
             post_ids = [post.get("id") for post in video_posts if post.get("free")]
         elif save_choice == "2":
