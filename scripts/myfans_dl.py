@@ -252,7 +252,12 @@ def download_videos_concurrently(session, post_ids, selected_resolution, output_
 
 def download_single_file(session, post_id, selected_resolution, output_dir, filename_config):
     headers = read_headers_from_file("header.txt")
-    process_post_id(post_id, session, headers, selected_resolution, output_dir, filename_config)
+    try:
+        response = session.get(f"https://api.myfans.jp/api/v2/posts/{post_id}", headers=headers)
+        response.raise_for_status()
+        process_post_id(post_id, session, headers, selected_resolution, output_dir, filename_config)
+    except requests.RequestException as e:
+        print(f"API request failed: {e}")
 
 def main():
     session = requests.Session()
@@ -321,53 +326,98 @@ def main():
     choice = input("Enter your choice (1/2): ")
 
     if choice == '1':
-        base_url = f"https://api.myfans.jp/api/v2/users/{user_id}/posts?sort_key=publish_start_at&page="
-        print("Fetching posts and collecting video posts...")
-        video_posts = []
-        page = 1
-        headers = read_headers_from_file("header.txt")
-        with tqdm(desc="Fetching pages") as pbar:
-            while True:
-                try:
-                    page_data = get_posts_for_page(base_url, page, headers)
-                    if not page_data:
+        # First get back number plan info
+        user_info_url = f"https://api.myfans.jp/api/v2/users/show_by_username?username={name_creator}"  # Changed URL format
+        print("Fetching user info and plans...")
+        try:
+            response = session.get(user_info_url, headers=headers)
+            response.raise_for_status()
+            user_data = response.json()
+            back_number_plan = user_data.get('current_back_number_plan')
+            user_id = user_data.get('id')  # Get user_id from the response
+            
+            if not user_id:
+                print("Failed to retrieve user ID. Please check the username and try again.")
+                return
+            
+            # Fetch regular posts
+            base_url = f"https://api.myfans.jp/api/v2/users/{user_id}/posts?page="
+            print("Fetching regular posts...")
+            video_posts = []
+            page = 1
+            
+            with tqdm(desc="Fetching regular posts") as pbar:
+                while True:
+                    try:
+                        response = requests.get(base_url + str(page), headers=headers)
+                        response.raise_for_status()
+                        json_data = response.json()
+                        
+                        if not json_data.get("data"):
+                            break
+                            
+                        for post in json_data["data"]:
+                            if post.get("kind") == "video":
+                                video_posts.append(post)
+                        
+                        page += 1
+                        pbar.update(1)
+                        
+                    except requests.RequestException as e:
+                        print(f"\nError fetching page {page}: {e}")
                         break
-                    page += 1
+            
+            # Fetch back number plan posts if available
+            if back_number_plan:
+                print("\nFetching back number plan posts...")
+                back_plan_url = f"https://api.myfans.jp/api/v2/users/{user_id}/back_number_posts?page="
+                page = 1
+                
+                with tqdm(desc="Fetching back plan posts") as pbar:
+                    while True:
+                        try:
+                            response = requests.get(back_plan_url + str(page), headers=headers)
+                            response.raise_for_status()
+                            json_data = response.json()
+                            
+                            if not json_data.get("data"):
+                                break
+                                
+                            for post in json_data["data"]:
+                                if post.get("kind") == "video":
+                                    video_posts.append(post)
+                            
+                            page += 1
+                            pbar.update(1)
+                            
+                        except requests.RequestException as e:
+                            print(f"\nError fetching back plan page {page}: {e}")
+                            break
+            
+            print(f"\nTotal video posts found: {len(video_posts)}")
 
-                    for post in page_data:
-                        if post.get("kind") == "video":
-                            video_posts.append(post)
-                    pbar.update(1)
-                except requests.HTTPError as e:
-                    print(f"Error fetching posts: {e}")
-                    break
-                except requests.RequestException as e:
-                    print(f"Request failed: {e}")
-                    break
+            print("Select which posts to download:")
+            print("1. Free posts only")
+            print("2. Subscribe posts only")
+            print("3. All posts")
+            save_choice = input("Enter your choice (1/2/3): ").strip()
 
-        if not video_posts:
-            print("No video posts found.")
-            return
+            if save_choice == "1":
+                post_ids = [post.get("id") for post in video_posts if post.get("free")]
+            elif save_choice == "2":
+                post_ids = [post.get("id") for post in video_posts if not post.get("free")]
+            else:
+                post_ids = [post.get("id") for post in video_posts]
 
-        print("Select which posts to download:")
-        print("1. Free posts only")
-        print("2. Subscribe posts only")
-        print("3. All posts")
-        save_choice = input("Enter your choice (1/2/3): ").strip()
+            if not post_ids:
+                print("No posts match the selected criteria.")
+                return
 
-        if save_choice == "1":
-            post_ids = [post.get("id") for post in video_posts if post.get("free")]
-        elif save_choice == "2":
-            post_ids = [post.get("id") for post in video_posts if not post.get("free")]
-        else:
-            post_ids = [post.get("id") for post in video_posts]
+            selected_resolution = 'fhd'
+            download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config)
 
-        if not post_ids:
-            print("No posts match the selected criteria.")
-            return
-
-        selected_resolution = 'fhd'
-        download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config)
+        except requests.RequestException as e:
+            print(f"An error occurred while fetching posts: {e}")
 
     elif choice == '2':
         post_id = input("Enter the post ID to download: ")
