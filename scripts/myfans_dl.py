@@ -340,7 +340,8 @@ def start_download(username, post_type, download_type, progress_queue):
         # Test token validity first
         try:
             headers = read_headers_from_file("header.txt")
-            test_url = "https://api.myfans.jp/api/v2/users/"
+            # Change this URL to use the profile endpoint
+            test_url = "https://api.myfans.jp/api/v2/users/profile"
             session = requests.Session()
             response = session.get(test_url, headers=headers)
             response.raise_for_status()
