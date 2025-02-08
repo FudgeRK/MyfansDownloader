@@ -334,7 +334,10 @@ def start_download(username, post_type, download_type, progress_queue):
                     response.raise_for_status()
                     json_data = response.json()
                     
-                    if not json_data.get("data"):
+                    if not json_data.get("data") or len(json_data["data"]) == 0:
+                        message = "No more regular posts found"
+                        logger.info(message)
+                        progress_queue.put(message)
                         break
                         
                     current_page_videos = [post for post in json_data["data"] if post.get("kind") == "video"]
@@ -351,9 +354,67 @@ def start_download(username, post_type, download_type, progress_queue):
                     logger.error(error)
                     progress_queue.put(error)
                     break
-            
-            # ... rest of the download logic with similar logging ...
-            
+
+            # Fetch back number plan posts if available
+            if back_number_plan:
+                message = "Starting to fetch back number plan posts..."
+                logger.info(message)
+                progress_queue.put(message)
+                
+                back_plan_url = f"https://api.myfans.jp/api/v2/users/{user_id}/back_number_posts?page="
+                page = 1
+                
+                while True:
+                    try:
+                        message = f"Fetching back plan page {page}..."
+                        logger.info(message)
+                        progress_queue.put(message)
+                        
+                        response = session.get(back_plan_url + str(page), headers=read_headers_from_file("header.txt"))
+                        response.raise_for_status()
+                        json_data = response.json()
+                        
+                        if not json_data.get("data") or len(json_data["data"]) == 0:
+                            message = "No more back plan posts found"
+                            logger.info(message)
+                            progress_queue.put(message)
+                            break
+                            
+                        current_page_videos = [post for post in json_data["data"] if post.get("kind") == "video"]
+                        video_posts.extend(current_page_videos)
+                        
+                        message = f"Found {len(current_page_videos)} back plan videos on page {page}"
+                        logger.info(message)
+                        progress_queue.put(message)
+                        
+                        page += 1
+                        
+                    except requests.RequestException as e:
+                        error = f"Error fetching back plan page {page}: {e}"
+                        logger.error(error)
+                        progress_queue.put(error)
+                        break
+
+            message = f"Total video posts found: {len(video_posts)}"
+            logger.info(message)
+            progress_queue.put(message)
+
+            # Filter posts based on download_type
+            if download_type == 'free':
+                filtered_posts = [post for post in video_posts if post.get("free")]
+            elif download_type == 'subscribed':
+                filtered_posts = [post for post in video_posts if not post.get("free")]
+            else:
+                filtered_posts = video_posts
+
+            message = f"Starting download of {len(filtered_posts)} filtered posts..."
+            logger.info(message)
+            progress_queue.put(message)
+
+            selected_resolution = 'fhd'
+            post_ids = [post.get("id") for post in filtered_posts]
+            download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config)
+
         progress_queue.put("DONE")
         
     except Exception as e:
