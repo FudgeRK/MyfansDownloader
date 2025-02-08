@@ -10,6 +10,13 @@ import concurrent.futures
 import threading
 import m3u8
 from urllib.parse import urljoin
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def read_headers_from_file(filename):
     headers = {}
@@ -262,11 +269,17 @@ def download_single_file(session, post_id, selected_resolution, output_dir, file
 def start_download(username, post_type, download_type, progress_queue):
     """Handle downloads initiated from the web interface"""
     try:
+        message = f"Starting download for user: {username}, type: {post_type}, mode: {download_type}"
+        logger.info(message)
+        progress_queue.put(message)
+        
         session = requests.Session()
         config_file_path = os.path.join(os.getenv('CONFIG_DIR', ''), 'config.ini')
         
         if not os.path.isfile(config_file_path):
-            progress_queue.put("Error: config.ini not found")
+            error = "Error: config.ini not found"
+            logger.error(error)
+            progress_queue.put(error)
             return
             
         config = configparser.ConfigParser()
@@ -279,19 +292,74 @@ def start_download(username, post_type, download_type, progress_queue):
         # Process downloads based on type
         if post_type == 'videos':
             user_info_url = f"https://api.myfans.jp/api/v2/users/show_by_username?username={username}"
-            progress_queue.put(f"Fetching user info for {username}...")
+            message = f"Fetching user info from: {user_info_url}"
+            logger.info(message)
+            progress_queue.put(message)
             
-            # ... Rest of your video download logic ...
-            # Make sure to use progress_queue.put() to send progress updates
+            response = session.get(user_info_url, headers=read_headers_from_file("header.txt"))
+            response.raise_for_status()
+            user_data = response.json()
             
-        elif post_type == 'images':
-            # ... Image download logic ...
-            pass
+            message = f"Successfully retrieved user data for: {username}"
+            logger.info(message)
+            progress_queue.put(message)
+            
+            # Fetch posts
+            back_number_plan = user_data.get('current_back_number_plan')
+            user_id = user_data.get('id')
+            
+            if not user_id:
+                error = "Failed to retrieve user ID. Please check the username and try again."
+                logger.error(error)
+                progress_queue.put(error)
+                return
+                
+            message = f"Found user ID: {user_id}"
+            logger.info(message)
+            progress_queue.put(message)
+            
+            # Fetch regular posts
+            base_url = f"https://api.myfans.jp/api/v2/users/{user_id}/posts?page="
+            progress_queue.put("Fetching regular posts...")
+            video_posts = []
+            page = 1
+            
+            while True:
+                try:
+                    message = f"Fetching page {page} of regular posts..."
+                    logger.info(message)
+                    progress_queue.put(message)
+                    
+                    response = session.get(base_url + str(page), headers=read_headers_from_file("header.txt"))
+                    response.raise_for_status()
+                    json_data = response.json()
+                    
+                    if not json_data.get("data"):
+                        break
+                        
+                    current_page_videos = [post for post in json_data["data"] if post.get("kind") == "video"]
+                    video_posts.extend(current_page_videos)
+                    
+                    message = f"Found {len(current_page_videos)} videos on page {page}"
+                    logger.info(message)
+                    progress_queue.put(message)
+                    
+                    page += 1
+                    
+                except requests.RequestException as e:
+                    error = f"Error fetching page {page}: {e}"
+                    logger.error(error)
+                    progress_queue.put(error)
+                    break
+            
+            # ... rest of the download logic with similar logging ...
             
         progress_queue.put("DONE")
         
     except Exception as e:
-        progress_queue.put(f"Error: {str(e)}")
+        error = f"Error: {str(e)}"
+        logger.error(error)
+        progress_queue.put(error)
         raise
 
 def main():
@@ -465,3 +533,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+``` 
