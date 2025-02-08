@@ -19,33 +19,25 @@ ENV CONFIG_DIR=/config \
     DOWNLOADS_DIR=/downloads \
     FILENAME_PATTERN="{creator}_{date}" \
     FILENAME_SEPARATOR="_" \
-    THREAD_COUNT="10"
+    THREAD_COUNT="10" \
+    AUTH_TOKEN="" \
+    FLASK_APP=app.py \
+    FLASK_ENV=production
 
 # Create directories
 RUN mkdir -p /config /downloads
 
-# Create entrypoint script with environment variable handling
+# Create entrypoint script
 RUN echo '#!/bin/sh\n\
-# Create or update config.ini with environment variables\n\
-cat > /config/config.ini << EOF\n\
-[Settings]\n\
-output_dir = $DOWNLOADS_DIR\n\
-\n\
-[Filename]\n\
-pattern = $FILENAME_PATTERN\n\
-separator = $FILENAME_SEPARATOR\n\
-numbers = 1234\n\
-letters = FudgeRK\n\
-\n\
-[Threads]\n\
-threads = $THREAD_COUNT\n\
+# Create config files from environment variables\n\
+cat > /config/header.txt << EOF\n\
+authorization: Token token=$AUTH_TOKEN\n\
+google-ga-data: event328\n\
+user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36\n\
 EOF\n\
 \n\
-# Copy header.txt if it doesn'\''t exist\n\
-if [ ! -f /config/header.txt ]; then\n\
-    cp header.txt /config/\n\
-fi\n\
-\n\
-python main.py' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+python app.py' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+EXPOSE 5000
 
 ENTRYPOINT ["/app/entrypoint.sh"]
