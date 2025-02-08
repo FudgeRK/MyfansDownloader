@@ -1,6 +1,8 @@
-requests
-Pillow
-tqdm
-m3u8
-typing-extensions
-urllib3
+requests>=2.32.3
+Pillow>=11.1.0
+tqdm>=4.67.1
+m3u8>=6.0.0
+typing-extensions>=4.12.2
+urllib3>=2.3.0
+configparser>=7.1.0
+flask>=3.1.0
