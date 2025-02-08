@@ -337,28 +337,6 @@ def start_download(username, post_type, download_type, progress_queue):
         logger.info(message)
         progress_queue.put(message)
         
-        # Test token validity first
-        try:
-            headers = read_headers_from_file("header.txt")
-            # Change this URL to use the profile endpoint
-            test_url = "https://api.myfans.jp/api/v2/users/profile"
-            session = requests.Session()
-            response = session.get(test_url, headers=headers)
-            response.raise_for_status()
-            message = "Token validation successful"
-            logger.info(message)
-            progress_queue.put(message)
-        except (FileNotFoundError, ValueError) as e:
-            error = f"Header file error: {str(e)}"
-            logger.error(error)
-            progress_queue.put(error)
-            return
-        except requests.RequestException as e:
-            error = f"Token validation failed: {str(e)}"
-            logger.error(error)
-            progress_queue.put(error)
-            return
-
         session = requests.Session()
         config_file_path = os.path.join(os.getenv('CONFIG_DIR', ''), 'config.ini')
         
