@@ -1,0 +1,13 @@
+services:
+  myfans-downloader:
+    image: frequency2098/myfans-downloader:latest
+    container_name: myfans-downloader
+    environment:
+      - CONFIG_DIR=/config
+      - DOWNLOADS_DIR=/downloads
+      - FILENAME_PATTERN={creator}_{date}_{title}
+      - FILENAME_SEPARATOR=_
+      - THREAD_COUNT=10
+    volumes:
+      - ./config:/config
+      - ./downloads:/downloads
