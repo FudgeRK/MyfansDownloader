@@ -20,11 +20,22 @@ logger = logging.getLogger(__name__)
 
 def read_headers_from_file(filename):
     headers = {}
-    with open(filename, 'r') as file:
+    config_dir = os.getenv('CONFIG_DIR', '')
+    header_path = os.path.join(config_dir, filename)
+    
+    if not os.path.isfile(header_path):
+        raise FileNotFoundError(f"Header file not found at {header_path}")
+        
+    with open(header_path, 'r') as file:
         for line in file:
             if ': ' in line:
                 key, value = line.strip().split(': ', 1)
                 headers[key.lower()] = value
+    
+    # Validate token presence
+    if 'authorization' not in headers or not headers['authorization'].startswith('Token token='):
+        raise ValueError("Invalid or missing authorization token in headers file")
+        
     return headers
 
 def get_posts_for_page(base_url, page, headers):
@@ -34,7 +45,7 @@ def get_posts_for_page(base_url, page, headers):
     json_data = response.json()
     return json_data.get("data", [])
 
-def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024, max_retries=3, retry_delay=5):
+def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024, max_retries=3, retry_delay=5, progress_queue=None):
     """
     Parses the M3U8 playlist, downloads each TS segment individually, merges them into .ts,
     and converts to MP4 with FFmpeg.
@@ -51,17 +62,24 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
 
         for attempt in range(max_retries):
             try:
-                print(f"Parsing M3U8 for post ID {input_post_id} (attempt {attempt+1}/{max_retries})...")
+                message = f"Parsing M3U8 for post ID {input_post_id} (attempt {attempt+1}/{max_retries})..."
+                if progress_queue:
+                    progress_queue.put(message)
+                    
                 playlist = m3u8.load(m3u8_url_download)
                 if not playlist.segments:
-                    print("No segments found in M3U8. Possible invalid URL or no access.")
+                    error = "No segments found in M3U8. Possible invalid URL or no access."
+                    if progress_queue:
+                        progress_queue.put(error)
                     return False
 
-                print(f"Found {len(playlist.segments)} segment(s) for post ID {input_post_id}.")
-                print("Downloading individually...")
+                message = f"Found {len(playlist.segments)} segment(s) for post ID {input_post_id}"
+                if progress_queue:
+                    progress_queue.put(message)
+                    progress_queue.put("Downloading segments...")
 
                 segment_files = []
-                with tqdm(total=len(playlist.segments), desc="Segments", unit="seg") as seg_pbar:
+                with tqdm(total=len(playlist.segments), desc=f"Segments for {input_post_id}", unit="seg") as seg_pbar:
                     if playlist.base_uri:
                         base_uri = playlist.base_uri
                     else:
@@ -101,6 +119,11 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
 
                         segment_files.append(seg_path)
                         seg_pbar.update(1)
+
+                        if success_download:
+                            if progress_queue and i % 10 == 0:  # Update progress every 10 segments
+                                progress = (i + 1) / len(playlist.segments) * 100
+                                progress_queue.put(f"Download progress: {progress:.1f}% ({i + 1}/{len(playlist.segments)})")
 
                 with open(ts_file, 'wb') as outfile:
                     for seg_file in segment_files:
@@ -151,83 +174,120 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
 def segment_uri_is_absolute(uri: str) -> bool:
     return uri.lower().startswith(("http://", "https://"))
 
-def process_post_id(input_post_id, session, headers, selected_resolution, output_dir, filename_config, progress_bar=None):
+def process_post_id(input_post_id, session, headers, selected_resolution, output_dir, filename_config, progress_bar=None, progress_queue=None):
     url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
     try:
         response = session.get(url, headers=headers)
+    
+        if response.status_code == 401:
+            error = "Authentication failed. Please check your token."
+            logger.error(error)
+            if progress_queue:
+                progress_queue.put(error)
+            if progress_bar:
+                progress_bar.update(1)
+            return
+        elif response.status_code == 403:
+            error = f"Access denied for post ID {input_post_id}. This might be a subscribed post."
+            logger.error(error)
+            if progress_queue:
+                progress_queue.put(error)
+            if progress_bar:
+                progress_bar.update(1)
+            return
+            
         response.raise_for_status()
     except requests.RequestException as e:
-        print(f"Request failed for post ID {input_post_id}: {e}")
+        error = f"Request failed for post ID {input_post_id}: {e}"
+        if progress_queue:
+            progress_queue.put(error)
         if progress_bar:
             progress_bar.update(1)
         return
 
     data = response.json()
-    main_videos = data['videos']['main']
+    main_videos = data.get('videos', {}).get('main', [])
     name_creator = data['user']['username']
 
-    if main_videos:
-        fhd_video = None
-        sd_video = None
-        for video in main_videos:
-            if video["resolution"] == 'fhd':
-                fhd_video = video
-            elif video["resolution"] == 'sd':
-                sd_video = video
+    if not main_videos:
+        error = f"No videos found or you don't have access to this file for post ID {input_post_id}"
+        if progress_queue:
+            progress_queue.put(error)
+        if progress_bar:
+            progress_bar.update(1)
+        return
 
-        if fhd_video:
-            selected_resolution = 'fhd'
-            selected_video = fhd_video
-        elif sd_video:
-            selected_resolution = 'sd'
-            selected_video = sd_video
-        else:
-            print(f"No suitable video resolution found for post ID {input_post_id}. Skipping.")
-            if progress_bar:
-                progress_bar.update(1)
-            return
+    fhd_video = None
+    sd_video = None
+    for video in main_videos:
+        if video["resolution"] == 'fhd':
+            fhd_video = video
+        elif video["resolution"] == 'sd':
+            sd_video = video
 
-        video_url = selected_video["url"]
-        video_base_url, video_extension = os.path.splitext(video_url)
-        if selected_resolution == "fhd":
-            target_resolution = "1080p"
-        elif selected_resolution == "sd":
-            target_resolution = "480p"
-
-        m3u8_url = f"{video_base_url}/{target_resolution}.m3u8"
-        m3u8_response = session.get(m3u8_url, headers=headers)
-
-        if video_url and m3u8_response.status_code == 200 and target_resolution == "1080p":
-            m3u8_url_download = f"{video_base_url}/1080p.m3u8"
-        elif video_url and m3u8_response.status_code == 200 and target_resolution == "480p":
-            m3u8_url_download = f"{video_base_url}/480p.m3u8"
-        else:
-            m3u8_url_download = f"{video_base_url}/360p.m3u8"
-
-        output_folder = os.path.join(output_dir, name_creator, "videos")
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-
-        full_output_path = os.path.join(
-            output_folder,
-            generate_filename(data, filename_config, output_folder)
-        )
-        
-        success = DL_File(m3u8_url_download, full_output_path, input_post_id)
-        if not success:
-            print(f"Failed to download post ID {input_post_id}.")
-            pass
+    if fhd_video:
+        selected_resolution = 'fhd'
+        selected_video = fhd_video
+    elif sd_video:
+        selected_resolution = 'sd'
+        selected_video = sd_video
     else:
-        print(f"No videos found or you don't have access to this file for post ID {input_post_id}.")
+        error = f"No suitable video resolution found for post ID {input_post_id}. Skipping."
+        if progress_queue:
+            progress_queue.put(error)
+        if progress_bar:
+            progress_bar.update(1)
+        return
+
+    video_url = selected_video["url"]
+    video_base_url, video_extension = os.path.splitext(video_url)
+    if selected_resolution == "fhd":
+        target_resolution = "1080p"
+    elif selected_resolution == "sd":
+        target_resolution = "480p"
+
+    m3u8_url = f"{video_base_url}/{target_resolution}.m3u8"
+    m3u8_response = session.get(m3u8_url, headers=headers)
+
+    if video_url and m3u8_response.status_code == 200 and target_resolution == "1080p":
+        m3u8_url_download = f"{video_base_url}/1080p.m3u8"
+    elif video_url and m3u8_response.status_code == 200 and target_resolution == "480p":
+        m3u8_url_download = f"{video_base_url}/480p.m3u8"
+    else:
+        m3u8_url_download = f"{video_base_url}/360p.m3u8"
+
+    output_folder = os.path.join(output_dir, name_creator, "videos")
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    full_output_path = os.path.join(
+        output_folder,
+        generate_filename(data, filename_config, output_folder)
+    )
+
+    if video_url and m3u8_response.status_code == 200:
+        message = f"Starting download of video {input_post_id}"
+        if progress_queue:
+            progress_queue.put(message)
+            
+        success = DL_File(m3u8_url_download, full_output_path, input_post_id, progress_queue=progress_queue)
+        if not success:
+            error = f"Failed to download post ID {input_post_id}"
+            if progress_queue:
+                progress_queue.put(error)
+    else:
+        error = f"No videos found or you don't have access to this file for post ID {input_post_id}"
+        if progress_queue:
+            progress_queue.put(error)
 
     if progress_bar:
         progress_bar.update(1)
-
-def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, max_workers=1):  # Changed to 1
-    """Download videos one at a time to avoid conflicts"""
+def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue=None, max_workers=1):
     headers = read_headers_from_file("header.txt")
     total_posts = len(post_ids)
-    print(f"\nStarting download of {total_posts} posts one at a time...")
+    message = f"Starting download of {total_posts} posts one at a time..."
+    if progress_queue:
+        progress_queue.put(message)
     
     progress_bar = tqdm(total=total_posts, desc="Downloading videos", unit="video")
 
@@ -240,22 +300,26 @@ def download_videos_concurrently(session, post_ids, selected_resolution, output_
                 selected_resolution,
                 output_dir,
                 filename_config,
-                progress_bar
+                progress_bar,
+                progress_queue
             )
         except Exception as e:
-            print(f"\nError processing post {input_post_id}: {e}")
+            error = f"Error processing post {input_post_id}: {e}"
+            if progress_queue:
+                progress_queue.put(error)
 
-    # Use ThreadPoolExecutor with max_workers=1 to process one video at a time
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         futures = [executor.submit(handle_download, post_id) for post_id in post_ids]
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
             except Exception as e:
-                print(f"\nAn error occurred during download: {e}")
+                if progress_queue:
+                    progress_queue.put(f"An error occurred during download: {e}")
 
     progress_bar.close()
-    print("\nDownload process completed.")
+    if progress_queue:
+        progress_queue.put("Download process completed")
 
 def download_single_file(session, post_id, selected_resolution, output_dir, filename_config):
     headers = read_headers_from_file("header.txt")
@@ -273,6 +337,27 @@ def start_download(username, post_type, download_type, progress_queue):
         logger.info(message)
         progress_queue.put(message)
         
+        # Test token validity first
+        try:
+            headers = read_headers_from_file("header.txt")
+            test_url = "https://api.myfans.jp/api/v2/users/me"
+            session = requests.Session()
+            response = session.get(test_url, headers=headers)
+            response.raise_for_status()
+            message = "Token validation successful"
+            logger.info(message)
+            progress_queue.put(message)
+        except (FileNotFoundError, ValueError) as e:
+            error = f"Header file error: {str(e)}"
+            logger.error(error)
+            progress_queue.put(error)
+            return
+        except requests.RequestException as e:
+            error = f"Token validation failed: {str(e)}"
+            logger.error(error)
+            progress_queue.put(error)
+            return
+
         session = requests.Session()
         config_file_path = os.path.join(os.getenv('CONFIG_DIR', ''), 'config.ini')
         
@@ -413,7 +498,7 @@ def start_download(username, post_type, download_type, progress_queue):
 
             selected_resolution = 'fhd'
             post_ids = [post.get("id") for post in filtered_posts]
-            download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config)
+            download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue)
 
         progress_queue.put("DONE")
         
