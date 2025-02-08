@@ -14,7 +14,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Set default environment variables
+# Add the current directory to PYTHONPATH
+ENV PYTHONPATH="${PYTHONPATH}:/app"
+
+# Set other environment variables
 ENV CONFIG_DIR=/config \
     DOWNLOADS_DIR=/downloads \
     FILENAME_PATTERN="{creator}_{date}" \
