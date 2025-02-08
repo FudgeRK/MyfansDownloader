@@ -55,7 +55,8 @@
 
             const events = new EventSource('/progress');
             events.onmessage = (event) => {
-                progress.innerHTML += event.data + '<br>';
+                const timestamp = new Date().toLocaleTimeString();
+                progress.innerHTML += `[${timestamp}] ${event.data}<br>`;
                 progress.scrollTop = progress.scrollHeight;
             };
         };
