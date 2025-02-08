@@ -46,3 +46,43 @@ Any kind of positive contribution is welcome! Please help the project improve by
 <h2>Special Thanks</h2>
 <a href="https://github.com/Shenggang" target="_self">Shenggang</a></br>
 <a href="https://github.com/bluems" target="_self">bluems</a>
+
+# MyFans Downloader
+
+## Docker Usage
+
+### Using Docker Compose (Recommended)
+
+1. Create the required directories:
+```bash
+mkdir -p config downloads
+```
+
+2. Start the container:
+```bash
+docker compose up
+```
+
+### Using Docker Run
+
+```bash
+docker run -it \
+  -e FILENAME_PATTERN="{creator}_{date}_{title}" \
+  -e FILENAME_SEPARATOR="_" \
+  -e THREAD_COUNT="10" \
+  -v $(pwd)/config:/config \
+  -v $(pwd)/downloads:/downloads \
+  frequency2098/myfans-downloader:latest
+```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| FILENAME_PATTERN | {creator}_{date} | Pattern for naming downloaded files |
+| FILENAME_SEPARATOR | _ | Separator between filename parts |
+| THREAD_COUNT | 10 | Number of concurrent download threads |
+
+## Configuration
+
+Place your `header.txt` file in the `config` directory before running the container.
