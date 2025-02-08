@@ -5,7 +5,7 @@ import requests
 import subprocess
 import configparser
 from tqdm import tqdm
-from filename_utils import *
+from scripts.filename_utils import *
 import concurrent.futures
 import threading
 import m3u8
@@ -258,6 +258,41 @@ def download_single_file(session, post_id, selected_resolution, output_dir, file
         process_post_id(post_id, session, headers, selected_resolution, output_dir, filename_config)
     except requests.RequestException as e:
         print(f"API request failed: {e}")
+
+def start_download(username, post_type, download_type, progress_queue):
+    """Handle downloads initiated from the web interface"""
+    try:
+        session = requests.Session()
+        config_file_path = os.path.join(os.getenv('CONFIG_DIR', ''), 'config.ini')
+        
+        if not os.path.isfile(config_file_path):
+            progress_queue.put("Error: config.ini not found")
+            return
+            
+        config = configparser.ConfigParser()
+        config.read(config_file_path)
+        
+        # Get configuration
+        output_dir = os.getenv('DOWNLOADS_DIR', config.get('Settings', 'output_dir'))
+        filename_config = read_filename_config(config)
+        
+        # Process downloads based on type
+        if post_type == 'videos':
+            user_info_url = f"https://api.myfans.jp/api/v2/users/show_by_username?username={username}"
+            progress_queue.put(f"Fetching user info for {username}...")
+            
+            # ... Rest of your video download logic ...
+            # Make sure to use progress_queue.put() to send progress updates
+            
+        elif post_type == 'images':
+            # ... Image download logic ...
+            pass
+            
+        progress_queue.put("DONE")
+        
+    except Exception as e:
+        progress_queue.put(f"Error: {str(e)}")
+        raise
 
 def main():
     session = requests.Session()
