@@ -4,6 +4,13 @@ from queue import Queue
 import threading
 import logging
 
+# Configure Flask logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 progress_queue = Queue()
 
@@ -18,11 +25,15 @@ def start_download():
     post_type = data.get('type', 'videos')  # 'videos' or 'images'
     download_type = data.get('download_type', 'all')  # 'all', 'free', or 'subscribed'
     
+    logger.info(f"Starting download request - Username: {username}, Type: {post_type}, Mode: {download_type}")
+    
     def download_thread():
         try:
             downloader.start_download(username, post_type, download_type, progress_queue)
         except Exception as e:
-            progress_queue.put(f"Error: {str(e)}")
+            error = f"Error in download thread: {str(e)}"
+            logger.error(error)
+            progress_queue.put(error)
     
     threading.Thread(target=download_thread).start()
     return jsonify({"status": "started"})
