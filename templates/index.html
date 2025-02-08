@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MyFans Downloader</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px;
+        }
+        .progress { 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            margin-top: 20px; 
+            height: 300px; 
+            overflow-y: auto;
+        }
+        form { margin-bottom: 20px; }
+        input, select, button { margin: 5px; padding: 5px; }
+    </style>
+</head>
+<body>
+    <h1>MyFans Downloader</h1>
+    <form id="downloadForm">
+        <input type="text" id="username" placeholder="Enter username" required>
+        <select id="type">
+            <option value="videos">Videos</option>
+            <option value="images">Images</option>
+        </select>
+        <select id="download_type">
+            <option value="all">All Posts</option>
+            <option value="free">Free Posts Only</option>
+            <option value="subscribed">Subscribed Posts Only</option>
+        </select>
+        <button type="submit">Start Download</button>
+    </form>
+    <div id="progress" class="progress"></div>
+
+    <script>
+        document.getElementById('downloadForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const progress = document.getElementById('progress');
+            progress.innerHTML = '';
+            
+            const response = await fetch('/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: document.getElementById('username').value,
+                    type: document.getElementById('type').value,
+                    download_type: document.getElementById('download_type').value
+                })
+            });
+
+            const events = new EventSource('/progress');
+            events.onmessage = (event) => {
+                progress.innerHTML += event.data + '<br>';
+                progress.scrollTop = progress.scrollHeight;
+            };
+        };
+    </script>
+</body>
+</html>
