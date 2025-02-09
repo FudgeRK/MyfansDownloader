@@ -5,6 +5,7 @@ from queue import Queue
 import threading
 import logging
 import os
+import requests
 from logging.handlers import RotatingFileHandler
 
 # Configure Flask logging
@@ -37,15 +38,16 @@ def get_status():
 def start_download():
     data = request.json
     username = data.get('username')
-    post_type = data.get('type', 'videos')  # 'videos' or 'images'
-    download_type = data.get('download_type', 'all')  # 'all', 'free', or 'subscribed'
+    post_type = data.get('type', 'videos')
+    download_type = data.get('download_type', 'all')
     post_id = data.get('post_id')
+    resolution = data.get('resolution', 'best')
     
-    logger.info(f"Starting download request - Username: {username}, Type: {post_type}, Mode: {download_type}, PostID: {post_id}")
+    logger.info(f"Starting download request - Username: {username}, Type: {post_type}, Mode: {download_type}, PostID: {post_id}, Resolution: {resolution}")
     
     def download_thread():
         try:
-            downloader.start_download(username, post_type, download_type, progress_queue, download_state, post_id=post_id)
+            downloader.start_download(username, post_type, download_type, progress_queue, download_state, post_id=post_id, resolution=resolution)
         except Exception as e:
             error = f"Error in download thread: {str(e)}"
             logger.error(error)
@@ -64,6 +66,28 @@ def progress():
             yield f"data: {progress}\n\n"
     
     return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/test_post/<post_id>')
+def test_post(post_id):
+    """Test endpoint to check post accessibility and available resolutions"""
+    try:
+        session = requests.Session()
+        headers = downloader.read_headers_from_file("header.txt")
+        data, resolution_info, error = downloader.get_video_info(post_id, session, headers)
+        
+        if error:
+            return jsonify({"error": error}), 400
+            
+        return jsonify({
+            "post_type": "video" if data.get('videos') else "image" if data.get('images') else "unknown",
+            "is_free": data.get('free', False),
+            "is_subscribed": data.get('subscribed', False),
+            "available_resolutions": list(resolution_info.keys()) if resolution_info else [],
+            "title": data.get('title', ''),
+            "created_at": data.get('created_at', '')
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
