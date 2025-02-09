@@ -17,33 +17,62 @@
             overflow-y: auto;
         }
         form { margin-bottom: 20px; }
-        input, select, button { margin: 5px; padding: 5px; }
+        input, select, button { 
+            margin: 5px; 
+            padding: 5px; 
+            min-width: 200px;
+        }
         .hidden { display: none; }
+        .form-group {
+            margin: 10px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
     <h1>MyFans Downloader</h1>
     <form id="downloadForm">
-        <select id="downloadType" onchange="toggleInputs()">
-            <option value="bulk">Download All Videos</option>
-            <option value="single">Download Single Video</option>
-        </select>
-        
-        <div id="bulkDownload">
-            <input type="text" id="username" placeholder="Enter username" required>
-            <select id="type">
+        <div class="form-group">
+            <label for="type">Content Type:</label>
+            <select id="type" onchange="updateFormOptions()">
                 <option value="videos">Videos</option>
                 <option value="images">Images</option>
             </select>
-            <select id="download_type">
-                <option value="all">All Posts</option>
-                <option value="free">Free Posts Only</option>
-                <option value="subscribed">Subscribed Posts Only</option>
+        </div>
+        
+        <div class="form-group">
+            <label for="downloadType">Download Mode:</label>
+            <select id="downloadType" onchange="toggleInputs()">
+                <option value="bulk">Download All Content</option>
+                <option value="single">Download Single Item</option>
             </select>
+        </div>
+
+        <div id="bulkDownload">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" placeholder="Enter username (without @)" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="download_type">Content Filter:</label>
+                <select id="download_type">
+                    <option value="all">All Posts</option>
+                    <option value="free">Free Posts Only</option>
+                    <option value="subscribed">Subscribed Posts Only</option>
+                </select>
+            </div>
         </div>
         
         <div id="singleDownload" class="hidden">
-            <input type="text" id="postId" placeholder="Enter post ID">
+            <div class="form-group">
+                <label for="postId">Post ID:</label>
+                <input type="text" id="postId" placeholder="Enter post ID">
+            </div>
         </div>
         
         <button type="submit">Start Download</button>
@@ -51,6 +80,16 @@
     <div id="progress" class="progress"></div>
 
     <script>
+        function updateFormOptions() {
+            const contentType = document.getElementById('type').value;
+            const downloadTypeSelect = document.getElementById('downloadType');
+            const bulkOptionText = contentType === 'videos' ? 'Download All Videos' : 'Download All Images';
+            const singleOptionText = contentType === 'videos' ? 'Download Single Video' : 'Download Single Image';
+            
+            downloadTypeSelect.options[0].text = bulkOptionText;
+            downloadTypeSelect.options[1].text = singleOptionText;
+        }
+
         function toggleInputs() {
             const downloadType = document.getElementById('downloadType').value;
             document.getElementById('bulkDownload').classList.toggle('hidden', downloadType === 'single');
@@ -69,7 +108,7 @@
                 download_type: document.getElementById('download_type').value
             } : {
                 post_id: document.getElementById('postId').value,
-                type: 'videos',
+                type: document.getElementById('type').value,
                 download_type: 'single'
             };
             
@@ -87,6 +126,12 @@
             };
         };
 
+        // Initialize form options on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            updateFormOptions();
+            loadStatus();
+        });
+
         async function loadStatus() {
             const response = await fetch('/status');
             const status = await response.json();
@@ -100,8 +145,6 @@
                 progress.innerHTML += `[${timestamp}] Post ${post_id}: ${info.status} ${progressText}<br>`;
             });
         }
-
-        document.addEventListener('DOMContentLoaded', loadStatus);
     </script>
 </body>
 </html>
