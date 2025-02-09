@@ -330,9 +330,29 @@ def download_single_file(session, post_id, selected_resolution, output_dir, file
     except requests.RequestException as e:
         print(f"API request failed: {e}")
 
-def start_download(username, post_type, download_type, progress_queue):
+def start_download(username, post_type, download_type, progress_queue, post_id=None):
     """Handle downloads initiated from the web interface"""
     try:
+        if post_id:
+            # Single video download
+            message = f"Starting download for post ID: {post_id}"
+            logger.info(message)
+            progress_queue.put(message)
+            
+            session = requests.Session()
+            config_file_path = os.path.join(os.getenv('CONFIG_DIR', ''), 'config.ini')
+            
+            config = configparser.ConfigParser()
+            config.read(config_file_path)
+            
+            output_dir = os.getenv('DOWNLOADS_DIR', config.get('Settings', 'output_dir'))
+            filename_config = read_filename_config(config)
+            
+            selected_resolution = 'fhd'
+            download_single_file(session, post_id, selected_resolution, output_dir, filename_config)
+            progress_queue.put("DONE")
+            return
+            
         message = f"Starting download for user: {username}, type: {post_type}, mode: {download_type}"
         logger.info(message)
         progress_queue.put(message)
