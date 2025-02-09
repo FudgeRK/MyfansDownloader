@@ -24,12 +24,13 @@ def start_download():
     username = data.get('username')
     post_type = data.get('type', 'videos')  # 'videos' or 'images'
     download_type = data.get('download_type', 'all')  # 'all', 'free', or 'subscribed'
+    post_id = data.get('post_id')
     
-    logger.info(f"Starting download request - Username: {username}, Type: {post_type}, Mode: {download_type}")
+    logger.info(f"Starting download request - Username: {username}, Type: {post_type}, Mode: {download_type}, PostID: {post_id}")
     
     def download_thread():
         try:
-            downloader.start_download(username, post_type, download_type, progress_queue)
+            downloader.start_download(username, post_type, download_type, progress_queue, post_id=post_id)
         except Exception as e:
             error = f"Error in download thread: {str(e)}"
             logger.error(error)
