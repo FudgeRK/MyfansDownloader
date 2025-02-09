@@ -66,6 +66,17 @@
                     <option value="subscribed">Subscribed Posts Only</option>
                 </select>
             </div>
+            
+            <div class="form-group">
+                <label for="resolution">Video Quality:</label>
+                <select id="resolution" name="resolution">
+                    <option value="best">Best Available</option>
+                    <option value="fhd">1080p (Full HD)</option>
+                    <option value="hd">720p (HD)</option>
+                    <option value="sd">480p (SD)</option>
+                    <option value="ld">360p (Low)</option>
+                </select>
+            </div>
         </div>
         
         <div id="singleDownload" class="hidden">
@@ -105,11 +116,13 @@
             const data = downloadType === 'bulk' ? {
                 username: document.getElementById('username').value,
                 type: document.getElementById('type').value,
-                download_type: document.getElementById('download_type').value
+                download_type: document.getElementById('download_type').value,
+                resolution: document.getElementById('resolution').value
             } : {
                 post_id: document.getElementById('postId').value,
                 type: document.getElementById('type').value,
-                download_type: 'single'
+                download_type: 'single',
+                resolution: document.getElementById('resolution').value
             };
             
             const response = await fetch('/download', {
