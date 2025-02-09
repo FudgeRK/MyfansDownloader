@@ -349,11 +349,11 @@ def download_single_file(session, post_id, selected_resolution, output_dir, file
     except requests.RequestException as e:
         print(f"API request failed: {e}")
 
-def start_download(username, post_type, download_type, progress_queue, post_id=None):
+def start_download(username, post_type, download_type, progress_queue, download_state=None, post_id=None):
     """Handle downloads initiated from the web interface"""
     try:
         if post_id:
-            # Single video download
+            # Single post download
             message = f"Starting download for post ID: {post_id}"
             logger.info(message)
             progress_queue.put(message)
@@ -367,11 +367,15 @@ def start_download(username, post_type, download_type, progress_queue, post_id=N
             output_dir = os.getenv('DOWNLOADS_DIR', config.get('Settings', 'output_dir'))
             filename_config = read_filename_config(config)
             
-            selected_resolution = 'fhd'
-            download_single_file(session, post_id, selected_resolution, output_dir, filename_config)
+            if post_type == 'videos':
+                selected_resolution = 'fhd'
+                download_single_file(session, post_id, selected_resolution, output_dir, filename_config)
+            else:  # images
+                headers = read_headers_from_file("header.txt")
+                handle_image_download(post_id, session, headers, output_dir, filename_config)
             progress_queue.put("DONE")
             return
-            
+
         message = f"Starting download for user: {username}, type: {post_type}, mode: {download_type}"
         logger.info(message)
         progress_queue.put(message)
@@ -518,6 +522,55 @@ def start_download(username, post_type, download_type, progress_queue, post_id=N
             post_ids = [post.get("id") for post in filtered_posts]
             download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue)
 
+        elif post_type == 'images':
+            base_url = f"https://api.myfans.jp/api/v2/users/{user_id}/posts?page="
+            progress_queue.put("Fetching image posts...")
+            image_posts = []
+            page = 1
+            
+            while True:
+                try:
+                    message = f"Fetching page {page} of image posts..."
+                    logger.info(message)
+                    progress_queue.put(message)
+                    
+                    response = session.get(base_url + str(page), headers=read_headers_from_file("header.txt"))
+                    response.raise_for_status()
+                    json_data = response.json()
+                    
+                    if not json_data.get("data"):
+                        break
+                        
+                    current_page_images = [post for post in json_data["data"] if post.get("kind") == "image"]
+                    image_posts.extend(current_page_images)
+                    
+                    message = f"Found {len(current_page_images)} images on page {page}"
+                    logger.info(message)
+                    progress_queue.put(message)
+                    
+                    page += 1
+                    
+                except requests.RequestException as e:
+                    error = f"Error fetching page {page}: {e}"
+                    logger.error(error)
+                    progress_queue.put(error)
+                    break
+
+            # Filter posts based on download_type
+            if download_type == 'free':
+                filtered_posts = [post for post in image_posts if post.get("free")]
+            elif download_type == 'subscribed':
+                filtered_posts = [post for post in image_posts if not post.get("free")]
+            else:
+                filtered_posts = image_posts
+
+            message = f"Starting download of {len(filtered_posts)} filtered image posts..."
+            logger.info(message)
+            progress_queue.put(message)
+
+            post_ids = [post.get("id") for post in filtered_posts]
+            download_images_concurrently(session, post_ids, output_dir, filename_config, progress_queue, download_state)
+
         progress_queue.put("DONE")
         
     except Exception as e:
@@ -525,6 +578,101 @@ def start_download(username, post_type, download_type, progress_queue, post_id=N
         logger.error(error)
         progress_queue.put(error)
         raise
+
+def download_images_concurrently(session, post_ids, output_dir, filename_config, progress_queue=None, download_state=None, max_workers=1):
+    headers = read_headers_from_file("header.txt")
+    total_posts = len(post_ids)
+    message = f"Starting download of {total_posts} image posts one at a time..."
+    if progress_queue:
+        progress_queue.put(message)
+    
+    progress_bar = tqdm(total=total_posts, desc="Downloading images", unit="post")
+
+    def handle_image_download(input_post_id):
+        try:
+            if download_state and download_state.is_completed(input_post_id):
+                message = f"Skipping already downloaded image post ID {input_post_id}"
+                logger.info(message)
+                if progress_queue:
+                    progress_queue.put(message)
+                progress_bar.update(1)
+                return
+
+            url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
+            response = session.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            images = data.get('images', {}).get('main', [])
+            if not images:
+                error = f"No images found for post ID {input_post_id}"
+                logger.error(error)
+                if progress_queue:
+                    progress_queue.put(error)
+                if download_state:
+                    download_state.mark_failed(input_post_id, error)
+                progress_bar.update(1)
+                return
+
+            name_creator = data['user']['username']
+            output_folder = os.path.join(output_dir, name_creator, "images")
+            os.makedirs(output_folder, exist_ok=True)
+
+            for idx, image in enumerate(images):
+                image_url = image.get('url')
+                if not image_url:
+                    continue
+
+                file_name = generate_filename(data, filename_config, output_folder)
+                if len(images) > 1:
+                    base, ext = os.path.splitext(file_name)
+                    file_name = f"{base}_{idx + 1}{ext}"
+
+                full_path = os.path.join(output_folder, file_name)
+                
+                if os.path.exists(full_path):
+                    message = f"Image already exists: {file_name}"
+                    logger.info(message)
+                    if progress_queue:
+                        progress_queue.put(message)
+                    continue
+
+                img_response = session.get(image_url, headers=headers)
+                img_response.raise_for_status()
+
+                with open(full_path, 'wb') as f:
+                    f.write(img_response.content)
+
+                message = f"Downloaded image: {file_name}"
+                logger.info(message)
+                if progress_queue:
+                    progress_queue.put(message)
+
+            if download_state:
+                download_state.mark_completed(input_post_id)
+            progress_bar.update(1)
+
+        except Exception as e:
+            error = f"Error downloading images for post {input_post_id}: {str(e)}"
+            logger.error(error)
+            if progress_queue:
+                progress_queue.put(error)
+            if download_state:
+                download_state.mark_failed(input_post_id, str(e))
+            progress_bar.update(1)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(handle_image_download, post_id) for post_id in post_ids]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                if progress_queue:
+                    progress_queue.put(f"An error occurred during download: {e}")
+
+    progress_bar.close()
+    if progress_queue:
+        progress_queue.put("Image download process completed")
 
 def main():
     session = requests.Session()
