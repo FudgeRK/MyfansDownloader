@@ -51,19 +51,29 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
     and converts to MP4 with FFmpeg.
     """
     try:
-        if download_state and download_state.is_completed(input_post_id):
-            message = f"Skipping already downloaded post ID {input_post_id}"
+        # Check if file already exists and is complete
+        if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+            message = f"File already exists and is complete: {os.path.basename(output_file)}"
             logger.info(message)
             if progress_queue:
                 progress_queue.put(message)
+            if download_state:
+                download_state.mark_completed(input_post_id)
             return True
+
+        # Check for partial download
+        temp_folder = output_file.replace('.mp4', '.ts_parts')
+        if os.path.exists(temp_folder):
+            message = f"Found partial download for {input_post_id}, resuming..."
+            logger.info(message)
+            if progress_queue:
+                progress_queue.put(message)
 
         output_folder = os.path.dirname(output_file)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
 
         ts_file = output_file.replace('.mp4', '.ts')
-        temp_folder = ts_file + "_parts"
         if not os.path.exists(temp_folder):
             os.makedirs(temp_folder)
 
@@ -514,13 +524,38 @@ def start_download(username, post_type, download_type, progress_queue, download_
             else:
                 filtered_posts = video_posts
 
-            message = f"Starting download of {len(filtered_posts)} filtered posts..."
+            # Check which files already exist
+            existing_files = []
+            missing_files = []
+            
+            for post in filtered_posts:
+                post_id = post.get("id")
+                filename = generate_filename(post, filename_config, output_dir)
+                full_path = os.path.join(output_dir, post['user']['username'], "videos", filename)
+                
+                if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
+                    existing_files.append(post_id)
+                    message = f"Skipping existing file: {filename}"
+                    logger.info(message)
+                    progress_queue.put(message)
+                else:
+                    missing_files.append(post_id)
+
+            message = f"Found {len(existing_files)} existing files, {len(missing_files)} files to download"
             logger.info(message)
             progress_queue.put(message)
 
-            selected_resolution = 'fhd'
-            post_ids = [post.get("id") for post in filtered_posts]
-            download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue)
+            if missing_files:
+                message = f"Starting download of {len(missing_files)} missing files..."
+                logger.info(message)
+                progress_queue.put(message)
+                download_videos_concurrently(session, missing_files, selected_resolution, output_dir, filename_config, progress_queue)
+            else:
+                message = "All files already downloaded!"
+                logger.info(message)
+                progress_queue.put(message)
+
+            progress_queue.put("DONE")
 
         elif post_type == 'images':
             base_url = f"https://api.myfans.jp/api/v2/users/{user_id}/posts?page="
