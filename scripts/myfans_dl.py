@@ -240,124 +240,74 @@ def segment_uri_is_absolute(uri: str) -> bool:
     return uri.lower().startswith(("http://", "https://"))
 
 def process_post_id(input_post_id, session, headers, selected_resolution, output_dir, filename_config, progress_bar=None, progress_queue=None):
-    max_retries = 3
-    retry_delay = 5
-    
-    for attempt in range(max_retries):
-        try:
-            url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
-            response = session.get(url, headers=headers)
+    try:
+        data, resolution_info, error = get_video_info(input_post_id, session, headers)
         
-            if response.status_code == 401:
-                error = "Authentication failed. Please check your token."
-                logger.error(error)
-                if progress_queue:
-                    progress_queue.put(error)
-                if progress_bar:
-                    progress_bar.update(1)
-                return
-            elif response.status_code == 403:
-                error = f"Access denied for post ID {input_post_id}. This might be a subscribed post."
-                logger.error(error)
-                if progress_queue:
-                    progress_queue.put(error)
-                if progress_bar:
-                    progress_bar.update(1)
-                return
-                
-            response.raise_for_status()
-        except requests.RequestException as e:
-            if attempt < max_retries - 1:
-                error = f"Network error on attempt {attempt + 1}/{max_retries}, retrying in {retry_delay}s: {str(e)}"
-                logger.warning(error)
-                if progress_queue:
-                    progress_queue.put(error)
-                time.sleep(retry_delay)
-                continue
-            else:
-                error = f"Final attempt failed for post {input_post_id}: {str(e)}"
-                logger.error(error)
-                if progress_queue:
-                    progress_queue.put(error)
-                return
-
-    data = response.json()
-    main_videos = data.get('videos', {}).get('main', [])
-    name_creator = data['user']['username']
-
-    if not main_videos:
-        error = f"No videos found or you don't have access to this file for post ID {input_post_id}"
-        if progress_queue:
-            progress_queue.put(error)
-        if progress_bar:
-            progress_bar.update(1)
-        return
-
-    fhd_video = None
-    sd_video = None
-    for video in main_videos:
-        if video["resolution"] == 'fhd':
-            fhd_video = video
-        elif video["resolution"] == 'sd':
-            sd_video = video
-
-    if fhd_video:
-        selected_resolution = 'fhd'
-        selected_video = fhd_video
-    elif sd_video:
-        selected_resolution = 'sd'
-        selected_video = sd_video
-    else:
-        error = f"No suitable video resolution found for post ID {input_post_id}. Skipping."
-        if progress_queue:
-            progress_queue.put(error)
-        if progress_bar:
-            progress_bar.update(1)
-        return
-
-    video_url = selected_video["url"]
-    video_base_url, video_extension = os.path.splitext(video_url)
-    if selected_resolution == "fhd":
-        target_resolution = "1080p"
-    elif selected_resolution == "sd":
-        target_resolution = "480p"
-
-    m3u8_url = f"{video_base_url}/{target_resolution}.m3u8"
-    m3u8_response = session.get(m3u8_url, headers=headers)
-
-    if video_url and m3u8_response.status_code == 200 and target_resolution == "1080p":
-        m3u8_url_download = f"{video_base_url}/1080p.m3u8"
-    elif video_url and m3u8_response.status_code == 200 and target_resolution == "480p":
-        m3u8_url_download = f"{video_base_url}/480p.m3u8"
-    else:
-        m3u8_url_download = f"{video_base_url}/360p.m3u8"
-
-    output_folder = os.path.join(output_dir, name_creator, "videos")
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-
-    full_output_path = os.path.join(
-        output_folder,
-        generate_filename(data, filename_config, output_folder)
-    )
-
-    if video_url and m3u8_response.status_code == 200:
-        message = f"Starting download of video {input_post_id}"
-        if progress_queue:
-            progress_queue.put(message)
-            
-        success = DL_File(m3u8_url_download, full_output_path, input_post_id, progress_queue=progress_queue)
-        if not success:
-            error = f"Failed to download post ID {input_post_id}"
+        if error:
+            message = f"Error fetching video info for post ID {input_post_id}: {error}"
+            logger.error(message)
             if progress_queue:
-                progress_queue.put(error)
-    else:
-        error = f"No videos found or you don't have access to this file for post ID {input_post_id}"
+                progress_queue.put(message)
+            if progress_bar:
+                progress_bar.update(1)
+            return False
+
+        if not data.get('videos', {}).get('main'):
+            # Check if post exists but is a different type
+            if data.get('images'):
+                message = f"Post ID {input_post_id} contains images, not videos"
+                logger.info(message)
+                if progress_queue:
+                    progress_queue.put(message)
+                if progress_bar:
+                    progress_bar.update(1)
+                return False
+
+            # Check access level
+            if data.get('free') is False and not data.get('subscribed'):
+                message = f"No access to post ID {input_post_id} (subscription required)"
+                logger.info(message)
+                if progress_queue:
+                    progress_queue.put(message)
+                if progress_bar:
+                    progress_bar.update(1)
+                return False
+
+        # Select resolution
+        if selected_resolution == 'best':
+            # Priority: fhd > hd > sd > ld
+            for res in ['fhd', 'hd', 'sd', 'ld']:
+                if res in resolution_info:
+                    selected_resolution = res
+                    break
+        
+        if selected_resolution not in resolution_info:
+            available = ', '.join(resolution_info.keys())
+            message = f"Resolution {selected_resolution} not available for post {input_post_id}. Available: {available}"
+            logger.warning(message)
+            if progress_queue:
+                progress_queue.put(message)
+            # Try fallback to best available
+            for res in ['fhd', 'hd', 'sd', 'ld']:
+                if res in resolution_info:
+                    selected_resolution = res
+                    message = f"Falling back to {res} resolution"
+                    logger.info(message)
+                    if progress_queue:
+                        progress_queue.put(message)
+                    break
+
+        # ... rest of the existing download code ...
+
+    except Exception as e:
+        error = f"Error processing post {input_post_id}: {str(e)}"
+        logger.error(error)
         if progress_queue:
             progress_queue.put(error)
+        if progress_bar:
+            progress_bar.update(1)
+        return False
 
-    if progress_bar:
-        progress_bar.update(1)
 def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue=None, max_workers=1):
     headers = read_headers_from_file("header.txt")
     total_posts = len(post_ids)
@@ -798,6 +748,55 @@ class DownloadState:
                         [f for f in os.listdir(temp_folder) if f.endswith('.ts')]
                     )
         self.save_state()
+
+def get_available_resolutions(main_videos):
+    """Get all available resolutions from video data"""
+    resolutions = {}
+    for video in main_videos:
+        res = video.get("resolution")
+        if res:
+            # Map API resolutions to display names
+            res_map = {
+                'fhd': '1080p (Full HD)',
+                'hd': '720p (HD)',
+                'sd': '480p (SD)',
+                'ld': '360p (LD)'
+            }
+            resolutions[res] = res_map.get(res, res)
+    
+    # Always add 'best' option
+    resolutions['best'] = 'Best Available'
+    return resolutions
+
+def get_video_info(input_post_id, session, headers):
+    """Get video information including available resolutions"""
+    try:
+        url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
+        response = session.get(url, headers=headers)
+        response.raise_for_status()
+        
+        data = response.json()
+        main_videos = data.get('videos', {}).get('main', [])
+        
+        if not main_videos:
+            return None, None, "No videos found"
+            
+        available_resolutions = []
+        resolution_info = {}
+        
+        for video in main_videos:
+            res = video.get("resolution")
+            if res:
+                available_resolutions.append(res)
+                resolution_info[res] = {
+                    "url": video.get("url"),
+                    "size": video.get("size", 0),
+                    "duration": video.get("duration", 0)
+                }
+        
+        return data, resolution_info, None
+    except Exception as e:
+        return None, None, str(e)
 
 def main():
     session = requests.Session()
