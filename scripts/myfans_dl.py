@@ -45,6 +45,18 @@ def get_posts_for_page(base_url, page, headers):
     json_data = response.json()
     return json_data.get("data", [])
 
+def verify_video_file(file_path):
+    """Verify the integrity of downloaded video file"""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", file_path, "-f", "null", "-"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
 def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024, max_retries=3, retry_delay=5, progress_queue=None, download_state=None):
     """
     Parses the M3U8 playlist, downloads each TS segment individually, merges them into .ts,
@@ -53,13 +65,20 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
     try:
         # Check if file already exists and is complete
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-            message = f"File already exists and is complete: {os.path.basename(output_file)}"
-            logger.info(message)
-            if progress_queue:
-                progress_queue.put(message)
-            if download_state:
-                download_state.mark_completed(input_post_id)
-            return True
+            if verify_video_file(output_file):
+                message = f"Verified existing file: {os.path.basename(output_file)}"
+                logger.info(message)
+                if progress_queue:
+                    progress_queue.put(message)
+                if download_state:
+                    download_state.mark_completed(input_post_id)
+                return True
+            else:
+                message = f"Corrupted file found, redownloading: {os.path.basename(output_file)}"
+                logger.warning(message)
+                if progress_queue:
+                    progress_queue.put(message)
+                os.remove(output_file)
 
         # Check for partial download
         temp_folder = output_file.replace('.mp4', '.ts_parts')
@@ -108,6 +127,15 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                     if download_state:
                         download_state.add_download(input_post_id, segments_total=len(playlist.segments))
 
+                    # Check completed segments in temp folder
+                    existing_segments = []
+                    if os.path.exists(temp_folder):
+                        existing_segments = [f for f in os.listdir(temp_folder) if f.endswith('.ts')]
+                        message = f"Found {len(existing_segments)} existing segments for {input_post_id}, checking integrity..."
+                        logger.info(message)
+                        if progress_queue:
+                            progress_queue.put(message)
+
                     for i, segment in enumerate(playlist.segments):
                         if download_state:
                             download_state.update_progress(input_post_id, i)
@@ -117,6 +145,14 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                             segment_url = urljoin(base_uri, segment_url)
 
                         seg_path = os.path.join(temp_folder, f"segment_{i}.ts")
+                        
+                        # Skip if segment exists and is valid
+                        if f"segment_{i}.ts" in existing_segments:
+                            if os.path.getsize(seg_path) > 0:
+                                segment_files.append(seg_path)
+                                seg_pbar.update(1)
+                                continue
+
                         success_download = False
 
                         for seg_attempt in range(max_retries):
@@ -204,35 +240,46 @@ def segment_uri_is_absolute(uri: str) -> bool:
     return uri.lower().startswith(("http://", "https://"))
 
 def process_post_id(input_post_id, session, headers, selected_resolution, output_dir, filename_config, progress_bar=None, progress_queue=None):
-    url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
-    try:
-        response = session.get(url, headers=headers)
+    max_retries = 3
+    retry_delay = 5
     
-        if response.status_code == 401:
-            error = "Authentication failed. Please check your token."
-            logger.error(error)
-            if progress_queue:
-                progress_queue.put(error)
-            if progress_bar:
-                progress_bar.update(1)
-            return
-        elif response.status_code == 403:
-            error = f"Access denied for post ID {input_post_id}. This might be a subscribed post."
-            logger.error(error)
-            if progress_queue:
-                progress_queue.put(error)
-            if progress_bar:
-                progress_bar.update(1)
-            return
-            
-        response.raise_for_status()
-    except requests.RequestException as e:
-        error = f"Request failed for post ID {input_post_id}: {e}"
-        if progress_queue:
-            progress_queue.put(error)
-        if progress_bar:
-            progress_bar.update(1)
-        return
+    for attempt in range(max_retries):
+        try:
+            url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
+            response = session.get(url, headers=headers)
+        
+            if response.status_code == 401:
+                error = "Authentication failed. Please check your token."
+                logger.error(error)
+                if progress_queue:
+                    progress_queue.put(error)
+                if progress_bar:
+                    progress_bar.update(1)
+                return
+            elif response.status_code == 403:
+                error = f"Access denied for post ID {input_post_id}. This might be a subscribed post."
+                logger.error(error)
+                if progress_queue:
+                    progress_queue.put(error)
+                if progress_bar:
+                    progress_bar.update(1)
+                return
+                
+            response.raise_for_status()
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                error = f"Network error on attempt {attempt + 1}/{max_retries}, retrying in {retry_delay}s: {str(e)}"
+                logger.warning(error)
+                if progress_queue:
+                    progress_queue.put(error)
+                time.sleep(retry_delay)
+                continue
+            else:
+                error = f"Final attempt failed for post {input_post_id}: {str(e)}"
+                logger.error(error)
+                if progress_queue:
+                    progress_queue.put(error)
+                return
 
     data = response.json()
     main_videos = data.get('videos', {}).get('main', [])
@@ -358,6 +405,16 @@ def download_single_file(session, post_id, selected_resolution, output_dir, file
         process_post_id(post_id, session, headers, selected_resolution, output_dir, filename_config)
     except requests.RequestException as e:
         print(f"API request failed: {e}")
+
+def check_disk_space(path, required_bytes):
+    """Check if there's enough disk space available"""
+    try:
+        stat = os.statvfs(path)
+        free_bytes = stat.f_frsize * stat.f_bavail
+        return free_bytes >= required_bytes
+    except Exception as e:
+        logger.error(f"Failed to check disk space: {e}")
+        return False
 
 def start_download(username, post_type, download_type, progress_queue, download_state=None, post_id=None):
     """Handle downloads initiated from the web interface"""
@@ -545,6 +602,16 @@ def start_download(username, post_type, download_type, progress_queue, download_
             logger.info(message)
             progress_queue.put(message)
 
+            # Estimate required space (rough estimate)
+            estimated_size_per_video = 100 * 1024 * 1024  # 100MB per video
+            required_space = len(missing_files) * estimated_size_per_video
+            
+            if not check_disk_space(output_dir, required_space):
+                error = f"Not enough disk space. Need approximately {required_space//(1024*1024)}MB"
+                logger.error(error)
+                progress_queue.put(error)
+                return
+
             if missing_files:
                 message = f"Starting download of {len(missing_files)} missing files..."
                 logger.info(message)
@@ -708,6 +775,26 @@ def download_images_concurrently(session, post_ids, output_dir, filename_config,
     progress_bar.close()
     if progress_queue:
         progress_queue.put("Image download process completed")
+
+class DownloadState:
+    def __init__(self, state_dir="/config"):
+        self.state_file = os.path.join(state_dir, "download_state.json")
+        self.state = self._load_state()
+        self._cleanup_incomplete()
+
+    def _cleanup_incomplete(self):
+        """Check for incomplete downloads and mark them for retry"""
+        downloads_dir = os.getenv('DOWNLOADS_DIR', '/downloads')
+        for post_id, info in self.state["downloads"].items():
+            if info["status"] == "in_progress":
+                # Check if the download was interrupted
+                temp_folder = os.path.join(downloads_dir, f"{post_id}_parts")
+                if os.path.exists(temp_folder):
+                    self.state["downloads"][post_id]["status"] = "incomplete"
+                    self.state["downloads"][post_id]["segments_downloaded"] = len(
+                        [f for f in os.listdir(temp_folder) if f.endswith('.ts')]
+                    )
+        self.save_state()
 
 def main():
     session = requests.Session()
