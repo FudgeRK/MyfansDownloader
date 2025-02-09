@@ -463,6 +463,9 @@ def start_download(username, post_type, download_type, progress_queue, download_
         output_dir = os.getenv('DOWNLOADS_DIR', config.get('Settings', 'output_dir'))
         filename_config = read_filename_config(config)
         
+        # Set default resolution
+        selected_resolution = 'fhd'
+
         # Process downloads based on type
         if post_type == 'videos':
             user_info_url = f"https://api.myfans.jp/api/v2/users/show_by_username?username={username}"
