@@ -6,6 +6,7 @@ class DownloadState:
     def __init__(self, state_dir="/config"):
         self.state_file = os.path.join(state_dir, "download_state.json")
         self.state = self._load_state()
+        self._scan_existing_files()
 
     def _load_state(self):
         if os.path.exists(self.state_file):
@@ -17,6 +18,18 @@ class DownloadState:
             "failed_files": {},
             "in_progress": {}
         }
+
+    def _scan_existing_files(self):
+        """Scan existing files in downloads directory and add to completed files"""
+        downloads_dir = os.getenv('DOWNLOADS_DIR', '/downloads')
+        if os.path.exists(downloads_dir):
+            for root, _, files in os.walk(downloads_dir):
+                for file in files:
+                    if file.endswith('.mp4'):
+                        # Extract post ID from filename if present
+                        # Assuming filename format includes post ID
+                        self.state["completed_files"].add(file)
+        self.save_state()
 
     def save_state(self):
         with open(self.state_file, 'w') as f:
@@ -58,3 +71,7 @@ class DownloadState:
 
     def get_progress(self, post_id):
         return self.state["downloads"].get(post_id, {})
+
+    def is_file_exists(self, filename):
+        """Check if file already exists in downloads"""
+        return filename in self.state["completed_files"]
