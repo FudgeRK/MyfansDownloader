@@ -85,6 +85,22 @@
                 progress.scrollTop = progress.scrollHeight;
             };
         };
+
+        async function loadStatus() {
+            const response = await fetch('/status');
+            const status = await response.json();
+            const progress = document.getElementById('progress');
+            
+            // Display existing downloads
+            Object.entries(status.downloads).forEach(([post_id, info]) => {
+                const timestamp = new Date(info.last_updated).toLocaleTimeString();
+                const progressText = info.segments_total ? 
+                    `(${info.segments_downloaded}/${info.segments_total} segments)` : '';
+                progress.innerHTML += `[${timestamp}] Post ${post_id}: ${info.status} ${progressText}<br>`;
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', loadStatus);
     </script>
 </body>
 </html>
