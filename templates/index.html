@@ -18,39 +18,64 @@
         }
         form { margin-bottom: 20px; }
         input, select, button { margin: 5px; padding: 5px; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
     <h1>MyFans Downloader</h1>
     <form id="downloadForm">
-        <input type="text" id="username" placeholder="Enter username" required>
-        <select id="type">
-            <option value="videos">Videos</option>
-            <option value="images">Images</option>
+        <select id="downloadType" onchange="toggleInputs()">
+            <option value="bulk">Download All Videos</option>
+            <option value="single">Download Single Video</option>
         </select>
-        <select id="download_type">
-            <option value="all">All Posts</option>
-            <option value="free">Free Posts Only</option>
-            <option value="subscribed">Subscribed Posts Only</option>
-        </select>
+        
+        <div id="bulkDownload">
+            <input type="text" id="username" placeholder="Enter username" required>
+            <select id="type">
+                <option value="videos">Videos</option>
+            </select>
+            <select id="download_type">
+                <option value="all">All Posts</option>
+                <option value="free">Free Posts Only</option>
+                <option value="subscribed">Subscribed Posts Only</option>
+            </select>
+        </div>
+        
+        <div id="singleDownload" class="hidden">
+            <input type="text" id="postId" placeholder="Enter post ID">
+        </div>
+        
         <button type="submit">Start Download</button>
     </form>
     <div id="progress" class="progress"></div>
 
     <script>
+        function toggleInputs() {
+            const downloadType = document.getElementById('downloadType').value;
+            document.getElementById('bulkDownload').classList.toggle('hidden', downloadType === 'single');
+            document.getElementById('singleDownload').classList.toggle('hidden', downloadType === 'bulk');
+        }
+
         document.getElementById('downloadForm').onsubmit = async (e) => {
             e.preventDefault();
             const progress = document.getElementById('progress');
             progress.innerHTML = '';
             
+            const downloadType = document.getElementById('downloadType').value;
+            const data = downloadType === 'bulk' ? {
+                username: document.getElementById('username').value,
+                type: document.getElementById('type').value,
+                download_type: document.getElementById('download_type').value
+            } : {
+                post_id: document.getElementById('postId').value,
+                type: 'videos',
+                download_type: 'single'
+            };
+            
             const response = await fetch('/download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    username: document.getElementById('username').value,
-                    type: document.getElementById('type').value,
-                    download_type: document.getElementById('download_type').value
-                })
+                body: JSON.stringify(data)
             });
 
             const events = new EventSource('/progress');
