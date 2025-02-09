@@ -6,15 +6,24 @@ class DownloadState:
     def __init__(self, state_dir="/config"):
         self.state_file = os.path.join(state_dir, "download_state.json")
         self.state = self._load_state()
+        # Convert completed_files list to set after loading
+        self.state["completed_files"] = set(self.state.get("completed_files", []))
         self._scan_existing_files()
 
     def _load_state(self):
         if os.path.exists(self.state_file):
-            with open(self.state_file, 'r') as f:
-                return json.load(f)
+            try:
+                with open(self.state_file, 'r') as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                # If file is corrupted, return default state
+                return self._default_state()
+        return self._default_state()
+
+    def _default_state(self):
         return {
             "downloads": {},
-            "completed_files": set(),
+            "completed_files": [],
             "failed_files": {},
             "in_progress": {}
         }
@@ -25,18 +34,19 @@ class DownloadState:
         if os.path.exists(downloads_dir):
             for root, _, files in os.walk(downloads_dir):
                 for file in files:
-                    if file.endswith('.mp4'):
-                        # Extract post ID from filename if present
-                        # Assuming filename format includes post ID
+                    if file.endswith(('.mp4', '.jpg', '.png', '.gif')):
                         self.state["completed_files"].add(file)
         self.save_state()
 
     def save_state(self):
-        with open(self.state_file, 'w') as f:
-            # Convert set to list for JSON serialization
+        """Save state to file, converting set to list for JSON serialization"""
+        try:
             state_copy = self.state.copy()
             state_copy["completed_files"] = list(self.state["completed_files"])
-            json.dump(state_copy, f)
+            with open(self.state_file, 'w') as f:
+                json.dump(state_copy, f)
+        except Exception as e:
+            print(f"Error saving state: {e}")
 
     def add_download(self, post_id, status="pending", segments_total=0, segments_downloaded=0):
         self.state["downloads"][post_id] = {
