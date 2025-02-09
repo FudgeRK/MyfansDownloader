@@ -45,12 +45,19 @@ def get_posts_for_page(base_url, page, headers):
     json_data = response.json()
     return json_data.get("data", [])
 
-def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024, max_retries=3, retry_delay=5, progress_queue=None):
+def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024, max_retries=3, retry_delay=5, progress_queue=None, download_state=None):
     """
     Parses the M3U8 playlist, downloads each TS segment individually, merges them into .ts,
     and converts to MP4 with FFmpeg.
     """
     try:
+        if download_state and download_state.is_completed(input_post_id):
+            message = f"Skipping already downloaded post ID {input_post_id}"
+            logger.info(message)
+            if progress_queue:
+                progress_queue.put(message)
+            return True
+
         output_folder = os.path.dirname(output_file)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
@@ -88,7 +95,13 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                         else:
                             base_uri = m3u8_url_download
 
+                    if download_state:
+                        download_state.add_download(input_post_id, segments_total=len(playlist.segments))
+
                     for i, segment in enumerate(playlist.segments):
+                        if download_state:
+                            download_state.update_progress(input_post_id, i)
+
                         segment_url = segment.uri
                         if not segment_uri_is_absolute(segment_url):
                             segment_url = urljoin(base_uri, segment_url)
@@ -150,6 +163,8 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                             os.remove(seg_file)
                         os.rmdir(temp_folder)
                         print(f"Successfully downloaded and converted post ID {input_post_id}.")
+                        if download_state:
+                            download_state.mark_completed(input_post_id)
                         return True
 
                 except subprocess.TimeoutExpired:
@@ -165,10 +180,14 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                 time.sleep(retry_delay)
 
         print(f"Failed to process post ID {input_post_id} after {max_retries} overall attempts.")
+        if download_state:
+            download_state.mark_failed(input_post_id, "Conversion failed")
         return False
 
     except Exception as e:
         print(f"Unexpected error for post ID {input_post_id}: {e}")
+        if download_state:
+            download_state.mark_failed(input_post_id, str(e))
         return False
 
 def segment_uri_is_absolute(uri: str) -> bool:
