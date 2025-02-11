@@ -12,13 +12,22 @@ from logging.handlers import RotatingFileHandler
 log_dir = os.getenv('CONFIG_DIR', '/config')
 log_file = os.path.join(log_dir, 'myfans_downloader.log')
 
+# Ensure log directory exists
+os.makedirs(log_dir, exist_ok=True)
+
+# Configure logging with both file and console handlers
+file_handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)
+console_handler = logging.StreamHandler()
+
+# Set format for both handlers
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+# Configure root logger
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5),
-        logging.StreamHandler()
-    ]
+    handlers=[file_handler, console_handler]
 )
 logger = logging.getLogger(__name__)
 
@@ -32,7 +41,7 @@ def index():
 
 @app.route('/status')
 def get_status():
-    return jsonify(download_state.state)
+    return jsonify(download_state.get_serializable_state())
 
 @app.route('/download', methods=['POST'])
 def start_download():
