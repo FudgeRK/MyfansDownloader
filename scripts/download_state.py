@@ -41,8 +41,7 @@ class DownloadState:
     def save_state(self):
         """Save state to file, converting set to list for JSON serialization"""
         try:
-            state_copy = self.state.copy()
-            state_copy["completed_files"] = list(self.state["completed_files"])
+            state_copy = self.get_serializable_state()
             with open(self.state_file, 'w') as f:
                 json.dump(state_copy, f)
         except Exception as e:
@@ -85,3 +84,10 @@ class DownloadState:
     def is_file_exists(self, filename):
         """Check if file already exists in downloads"""
         return filename in self.state["completed_files"]
+
+    def get_serializable_state(self):
+        """Return a JSON-serializable version of the state"""
+        state_copy = self.state.copy()
+        if isinstance(state_copy.get("completed_files"), set):
+            state_copy["completed_files"] = list(state_copy["completed_files"])
+        return state_copy
