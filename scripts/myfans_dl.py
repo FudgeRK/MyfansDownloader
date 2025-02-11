@@ -248,30 +248,23 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
             logger.error(message)
             if progress_queue:
                 progress_queue.put(message)
-            if progress_bar:
-                progress_bar.update(1)
-            return False
+            return True  # Return True to continue with next file
 
+        # Check if it's actually a video post
         if not data.get('videos', {}).get('main'):
-            # Check if post exists but is a different type
-            if data.get('images'):
-                message = f"Post ID {input_post_id} contains images, not videos"
-                logger.info(message)
-                if progress_queue:
-                    progress_queue.put(message)
-                if progress_bar:
-                    progress_bar.update(1)
-                return False
+            message = f"Post ID {input_post_id} is not a video post"
+            logger.info(message)
+            if progress_queue:
+                progress_queue.put(message)
+            return True  # Return True to continue with next file
 
-            # Check access level
-            if data.get('free') is False and not data.get('subscribed'):
-                message = f"No access to post ID {input_post_id} (subscription required)"
-                logger.info(message)
-                if progress_queue:
-                    progress_queue.put(message)
-                if progress_bar:
-                    progress_bar.update(1)
-                return False
+        # Check access level
+        if data.get('free') is False and not data.get('subscribed'):
+            message = f"No access to post ID {input_post_id} (subscription required)"
+            logger.info(message)
+            if progress_queue:
+                progress_queue.put(message)
+            return True  # Return True to continue with next file
 
         # Select resolution
         if selected_resolution == 'best':
@@ -304,9 +297,7 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
         logger.error(error)
         if progress_queue:
             progress_queue.put(error)
-        if progress_bar:
-            progress_bar.update(1)
-        return False
+        return True  # Return True to continue with next file
 
 def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue=None, max_workers=1):
     headers = read_headers_from_file("header.txt")
