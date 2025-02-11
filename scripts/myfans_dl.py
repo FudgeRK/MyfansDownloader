@@ -241,6 +241,8 @@ def segment_uri_is_absolute(uri: str) -> bool:
 
 def process_post_id(input_post_id, session, headers, selected_resolution, output_dir, filename_config, progress_bar=None, progress_queue=None):
     try:
+        # Get video info with detailed logging
+        logger.info(f"Fetching video info for post ID {input_post_id}")
         data, resolution_info, error = get_video_info(input_post_id, session, headers)
         
         if error:
@@ -248,30 +250,39 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
             logger.error(message)
             if progress_queue:
                 progress_queue.put(message)
-            return True  # Return True to continue with next file
+            return False  # Changed to False since this is an error
 
-        # Check if it's actually a video post
+        # Log available resolutions
+        if resolution_info:
+            logger.info(f"Available resolutions for post {input_post_id}: {list(resolution_info.keys())}")
+        else:
+            logger.error(f"No resolution info available for post {input_post_id}")
+            return False
+
+        # Check if it's a video post
         if not data.get('videos', {}).get('main'):
             message = f"Post ID {input_post_id} is not a video post"
-            logger.info(message)
+            logger.error(message)
             if progress_queue:
                 progress_queue.put(message)
-            return True  # Return True to continue with next file
+            return False
 
-        # Check access level
+        # Check access level with detailed logging
+        logger.info(f"Post {input_post_id} - Free: {data.get('free')}, Subscribed: {data.get('subscribed')}")
         if data.get('free') is False and not data.get('subscribed'):
             message = f"No access to post ID {input_post_id} (subscription required)"
-            logger.info(message)
+            logger.error(message)
             if progress_queue:
                 progress_queue.put(message)
-            return True  # Return True to continue with next file
+            return False
 
-        # Select resolution
+        # Select resolution with fallback logging
         if selected_resolution == 'best':
-            # Priority: fhd > hd > sd > ld
+            original_resolution = selected_resolution
             for res in ['fhd', 'hd', 'sd', 'ld']:
                 if res in resolution_info:
                     selected_resolution = res
+                    logger.info(f"Selected best available resolution for post {input_post_id}: {res}")
                     break
         
         if selected_resolution not in resolution_info:
@@ -280,7 +291,7 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
             logger.warning(message)
             if progress_queue:
                 progress_queue.put(message)
-            # Try fallback to best available
+            # Try fallback
             for res in ['fhd', 'hd', 'sd', 'ld']:
                 if res in resolution_info:
                     selected_resolution = res
@@ -289,12 +300,35 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
                     if progress_queue:
                         progress_queue.put(message)
                     break
+            else:
+                logger.error(f"No valid resolution found for post {input_post_id}")
+                return False
 
-        # Add the actual download implementation after resolution selection
+        # Get video URL and validate
+        video_url = resolution_info[selected_resolution]["url"]
+        if not video_url:
+            logger.error(f"No video URL found for post {input_post_id} at resolution {selected_resolution}")
+            return False
+
+        # Log video URL (masked for security)
+        masked_url = video_url[:30] + "..." + video_url[-30:] if len(video_url) > 60 else video_url
+        logger.info(f"Video URL for post {input_post_id}: {masked_url}")
+
+        # Validate URL accessibility
+        try:
+            head_response = session.head(video_url)
+            head_response.raise_for_status()
+            logger.info(f"Video URL is accessible for post {input_post_id}")
+        except Exception as e:
+            logger.error(f"Video URL is not accessible for post {input_post_id}: {str(e)}")
+            return False
+
+        # Setup output path
         filename = generate_filename(data, filename_config, output_dir)
         output_folder = os.path.join(output_dir, data['user']['username'], "videos")
         full_path = os.path.join(output_folder, filename)
         
+        # Check existing file
         if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
             message = f"File already exists: {filename}"
             logger.info(message)
@@ -304,9 +338,10 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
                 progress_bar.update(1)
             return True
 
-        video_url = resolution_info[selected_resolution]["url"]
+        # Create output directory
         os.makedirs(output_folder, exist_ok=True)
 
+        # Start download
         message = f"Starting download of video {input_post_id}"
         logger.info(message)
         if progress_queue:
@@ -322,19 +357,16 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
         if success:
             message = f"Successfully downloaded video: {filename}"
             logger.info(message)
-            if progress_queue:
-                progress_queue.put(message)
-            if progress_bar:
-                progress_bar.update(1)
-            return True
         else:
-            error = f"Failed to download video for post ID {input_post_id}"
-            logger.error(error)
-            if progress_queue:
-                progress_queue.put(error)
-            if progress_bar:
-                progress_bar.update(1)
-            return False
+            message = f"Failed to download video for post ID {input_post_id}"
+            logger.error(message)
+        
+        if progress_queue:
+            progress_queue.put(message)
+        if progress_bar:
+            progress_bar.update(1)
+        
+        return success
 
     except Exception as e:
         error = f"Error processing post {input_post_id}: {str(e)}"
