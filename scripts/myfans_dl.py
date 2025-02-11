@@ -290,14 +290,60 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
                         progress_queue.put(message)
                     break
 
-        # ... rest of the existing download code ...
+        # Add the actual download implementation after resolution selection
+        filename = generate_filename(data, filename_config, output_dir)
+        output_folder = os.path.join(output_dir, data['user']['username'], "videos")
+        full_path = os.path.join(output_folder, filename)
+        
+        if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
+            message = f"File already exists: {filename}"
+            logger.info(message)
+            if progress_queue:
+                progress_queue.put(message)
+            if progress_bar:
+                progress_bar.update(1)
+            return True
+
+        video_url = resolution_info[selected_resolution]["url"]
+        os.makedirs(output_folder, exist_ok=True)
+
+        message = f"Starting download of video {input_post_id}"
+        logger.info(message)
+        if progress_queue:
+            progress_queue.put(message)
+
+        success = DL_File(
+            video_url,
+            full_path,
+            input_post_id,
+            progress_queue=progress_queue
+        )
+
+        if success:
+            message = f"Successfully downloaded video: {filename}"
+            logger.info(message)
+            if progress_queue:
+                progress_queue.put(message)
+            if progress_bar:
+                progress_bar.update(1)
+            return True
+        else:
+            error = f"Failed to download video for post ID {input_post_id}"
+            logger.error(error)
+            if progress_queue:
+                progress_queue.put(error)
+            if progress_bar:
+                progress_bar.update(1)
+            return False
 
     except Exception as e:
         error = f"Error processing post {input_post_id}: {str(e)}"
         logger.error(error)
         if progress_queue:
             progress_queue.put(error)
-        return True  # Return True to continue with next file
+        if progress_bar:
+            progress_bar.update(1)
+        return False
 
 def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue=None, max_workers=1):
     headers = read_headers_from_file("header.txt")
@@ -735,6 +781,61 @@ class DownloadState:
                         [f for f in os.listdir(temp_folder) if f.endswith('.ts')]
                     )
         self.save_state()
+
+    def _load_state(self):
+        """Load download state from JSON file"""
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    return json.loads(f.read())
+            return {"completed_files": [], "downloads": {}}
+        except Exception as e:
+            logger.error(f"Error loading state file: {e}")
+            return {"completed_files": [], "downloads": {}}
+
+    def save_state(self):
+        """Save current state to JSON file"""
+        try:
+            with open(self.state_file, 'w') as f:
+                json.dump(self.state, f)
+        except Exception as e:
+            logger.error(f"Error saving state file: {e}")
+
+    def add_download(self, post_id, segments_total=0):
+        """Add new download to state"""
+        self.state["downloads"][str(post_id)] = {
+            "status": "in_progress",
+            "segments_total": segments_total,
+            "segments_downloaded": 0
+        }
+        self.save_state()
+
+    def update_progress(self, post_id, segments_done):
+        """Update download progress"""
+        if str(post_id) in self.state["downloads"]:
+            self.state["downloads"][str(post_id)]["segments_downloaded"] = segments_done
+            self.save_state()
+
+    def mark_completed(self, post_id):
+        """Mark download as completed"""
+        post_id = str(post_id)
+        if post_id not in self.state["completed_files"]:
+            self.state["completed_files"].append(post_id)
+        if post_id in self.state["downloads"]:
+            del self.state["downloads"][post_id]
+        self.save_state()
+
+    def mark_failed(self, post_id, error):
+        """Mark download as failed"""
+        self.state["downloads"][str(post_id)] = {
+            "status": "failed",
+            "error": error
+        }
+        self.save_state()
+
+    def is_completed(self, post_id):
+        """Check if download is already completed"""
+        return str(post_id) in self.state["completed_files"]
 
 def get_available_resolutions(main_videos):
     """Get all available resolutions from video data"""
