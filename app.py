@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, Response
 import scripts.myfans_dl as downloader
 from scripts.download_state import DownloadState
-from queue import Queue
+from queue import Queue, Empty  # Add Empty here
 import threading
 import logging
 import os
@@ -69,10 +69,16 @@ def start_download():
 def progress():
     def generate():
         while True:
-            progress = progress_queue.get()
-            if progress == "DONE":
+            try:
+                progress = progress_queue.get(timeout=1)  # Add timeout
+                if progress == "DONE":
+                    break
+                yield f"data: {progress}\n\n"
+            except queue.Empty:
+                continue  # Keep connection alive
+            except Exception as e:
+                logger.error(f"Error in progress stream: {e}")
                 break
-            yield f"data: {progress}\n\n"
     
     return Response(generate(), mimetype='text/event-stream')
 
