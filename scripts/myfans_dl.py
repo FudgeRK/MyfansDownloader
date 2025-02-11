@@ -357,7 +357,7 @@ def check_disk_space(path, required_bytes):
         logger.error(f"Failed to check disk space: {e}")
         return False
 
-def start_download(username, post_type, download_type, progress_queue, download_state=None, post_id=None):
+def start_download(username, post_type, download_type, progress_queue, download_state=None, post_id=None, resolution='best'):
     """Handle downloads initiated from the web interface"""
     try:
         if post_id:
@@ -376,11 +376,10 @@ def start_download(username, post_type, download_type, progress_queue, download_
             filename_config = read_filename_config(config)
             
             if post_type == 'videos':
-                selected_resolution = 'fhd'
-                download_single_file(session, post_id, selected_resolution, output_dir, filename_config)
+                download_single_file(session, post_id, resolution, output_dir, filename_config)
             else:  # images
                 headers = read_headers_from_file("header.txt")
-                handle_image_download(post_id, session, headers, output_dir, filename_config)
+                handle_image_download(post_id, session, headers, output_dir, filename_config, progress_queue)
             progress_queue.put("DONE")
             return
 
@@ -404,9 +403,6 @@ def start_download(username, post_type, download_type, progress_queue, download_
         output_dir = os.getenv('DOWNLOADS_DIR', config.get('Settings', 'output_dir'))
         filename_config = read_filename_config(config)
         
-        # Set default resolution
-        selected_resolution = 'fhd'
-
         # Process downloads based on type
         if post_type == 'videos':
             user_info_url = f"https://api.myfans.jp/api/v2/users/show_by_username?username={username}"
@@ -560,7 +556,7 @@ def start_download(username, post_type, download_type, progress_queue, download_
                 message = f"Starting download of {len(missing_files)} missing files..."
                 logger.info(message)
                 progress_queue.put(message)
-                download_videos_concurrently(session, missing_files, selected_resolution, output_dir, filename_config, progress_queue)
+                download_videos_concurrently(session, missing_files, resolution, output_dir, filename_config, progress_queue)
             else:
                 message = "All files already downloaded!"
                 logger.info(message)
@@ -788,6 +784,65 @@ def get_video_info(input_post_id, session, headers):
         return data, resolution_info, None
     except Exception as e:
         return None, None, str(e)
+
+def handle_image_download(post_id, session, headers, output_dir, filename_config, progress_queue=None):
+    """Handle downloading of a single image post"""
+    try:
+        url = f"https://api.myfans.jp/api/v2/posts/{post_id}"
+        response = session.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        
+        images = data.get('images', {}).get('main', [])
+        if not images:
+            error = f"No images found for post ID {post_id}"
+            logger.error(error)
+            if progress_queue:
+                progress_queue.put(error)
+            return False
+
+        name_creator = data['user']['username']
+        output_folder = os.path.join(output_dir, name_creator, "images")
+        os.makedirs(output_folder, exist_ok=True)
+
+        for idx, image in enumerate(images):
+            image_url = image.get('url')
+            if not image_url:
+                continue
+
+            file_name = generate_filename(data, filename_config, output_folder)
+            if len(images) > 1:
+                base, ext = os.path.splitext(file_name)
+                file_name = f"{base}_{idx + 1}{ext}"
+
+            full_path = os.path.join(output_folder, file_name)
+            
+            if os.path.exists(full_path):
+                message = f"Image already exists: {file_name}"
+                logger.info(message)
+                if progress_queue:
+                    progress_queue.put(message)
+                continue
+
+            img_response = session.get(image_url, headers=headers)
+            img_response.raise_for_status()
+
+            with open(full_path, 'wb') as f:
+                f.write(img_response.content)
+
+            message = f"Downloaded image: {file_name}"
+            logger.info(message)
+            if progress_queue:
+                progress_queue.put(message)
+
+        return True
+
+    except Exception as e:
+        error = f"Error downloading images for post {post_id}: {str(e)}"
+        logger.error(error)
+        if progress_queue:
+            progress_queue.put(error)
+        return False
 
 def main():
     session = requests.Session()
