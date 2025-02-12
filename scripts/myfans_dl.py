@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json  # Add missing import
 import requests
 import subprocess
 import configparser
@@ -63,6 +64,11 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
     and converts to MP4 with FFmpeg.
     """
     try:
+        # Add M3U8 URL validation
+        if not m3u8_url_download:
+            logger.error(f"Invalid M3U8 URL for post {input_post_id}")
+            return False
+
         # Check if file already exists and is complete
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
             if verify_video_file(output_file):
@@ -80,160 +86,140 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                     progress_queue.put(message)
                 os.remove(output_file)
 
-        # Check for partial download
-        temp_folder = output_file.replace('.mp4', '.ts_parts')
-        if os.path.exists(temp_folder):
-            message = f"Found partial download for {input_post_id}, resuming..."
-            logger.info(message)
-            if progress_queue:
-                progress_queue.put(message)
-
+        # Create output directory if it doesn't exist
         output_folder = os.path.dirname(output_file)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
 
         ts_file = output_file.replace('.mp4', '.ts')
+        temp_folder = output_file.replace('.mp4', '.ts_parts')
         if not os.path.exists(temp_folder):
             os.makedirs(temp_folder)
 
         for attempt in range(max_retries):
             try:
                 message = f"Parsing M3U8 for post ID {input_post_id} (attempt {attempt+1}/{max_retries})..."
+                logger.info(message)
                 if progress_queue:
                     progress_queue.put(message)
                     
-                playlist = m3u8.load(m3u8_url_download)
-                if not playlist.segments:
-                    error = "No segments found in M3U8. Possible invalid URL or no access."
-                    if progress_queue:
-                        progress_queue.put(error)
+                # Load M3U8 with detailed error handling
+                try:
+                    playlist = m3u8.load(m3u8_url_download)
+                    if not playlist or not playlist.segments:
+                        error = f"Invalid M3U8 playlist for post {input_post_id}"
+                        logger.error(error)
+                        if progress_queue:
+                            progress_queue.put(error)
+                        return False
+                except Exception as e:
+                    logger.error(f"M3U8 parsing error for post {input_post_id}: {str(e)}")
                     return False
 
-                message = f"Found {len(playlist.segments)} segment(s) for post ID {input_post_id}"
+                message = f"Found {len(playlist.segments)} segment(s) for post {input_post_id}"
+                logger.info(message)
                 if progress_queue:
                     progress_queue.put(message)
-                    progress_queue.put("Downloading segments...")
 
                 segment_files = []
                 with tqdm(total=len(playlist.segments), desc=f"Segments for {input_post_id}", unit="seg") as seg_pbar:
-                    if playlist.base_uri:
-                        base_uri = playlist.base_uri
-                    else:
-                        if '/' in m3u8_url_download:
-                            base_uri = m3u8_url_download.rsplit('/', 1)[0] + '/'
-                        else:
-                            base_uri = m3u8_url_download
+                    base_uri = playlist.base_uri or os.path.dirname(m3u8_url_download) + '/'
 
                     if download_state:
                         download_state.add_download(input_post_id, segments_total=len(playlist.segments))
-
-                    # Check completed segments in temp folder
-                    existing_segments = []
-                    if os.path.exists(temp_folder):
-                        existing_segments = [f for f in os.listdir(temp_folder) if f.endswith('.ts')]
-                        message = f"Found {len(existing_segments)} existing segments for {input_post_id}, checking integrity..."
-                        logger.info(message)
-                        if progress_queue:
-                            progress_queue.put(message)
 
                     for i, segment in enumerate(playlist.segments):
                         if download_state:
                             download_state.update_progress(input_post_id, i)
 
-                        segment_url = segment.uri
-                        if not segment_uri_is_absolute(segment_url):
-                            segment_url = urljoin(base_uri, segment_url)
-
+                        segment_url = urljoin(base_uri, segment.uri) if not segment.uri.startswith(('http://', 'https://')) else segment.uri
                         seg_path = os.path.join(temp_folder, f"segment_{i}.ts")
-                        
-                        # Skip if segment exists and is valid
-                        if f"segment_{i}.ts" in existing_segments:
-                            if os.path.getsize(seg_path) > 0:
-                                segment_files.append(seg_path)
-                                seg_pbar.update(1)
-                                continue
 
-                        success_download = False
-
+                        success = False
                         for seg_attempt in range(max_retries):
                             try:
-                                with requests.get(segment_url, stream=True, timeout=120) as resp:
-                                    resp.raise_for_status()
-                                    with open(seg_path, "wb") as f:
-                                        for chunk in resp.iter_content(chunk_size=chunk_size):
-                                            if chunk:
-                                                f.write(chunk)
-                                success_download = True
-                                time.sleep(0.25)
-                                break
+                                response = requests.get(segment_url, stream=True, timeout=30)
+                                response.raise_for_status()
+                                
+                                with open(seg_path, 'wb') as f:
+                                    for chunk in response.iter_content(chunk_size=chunk_size):
+                                        if chunk:
+                                            f.write(chunk)
+                                
+                                if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
+                                    success = True
+                                    break
+                                    
                             except Exception as e:
-                                print(f"Error downloading segment {i} for post ID {input_post_id}: {e}")
+                                logger.error(f"Error downloading segment {i}: {str(e)}")
                                 if seg_attempt < max_retries - 1:
-                                    print(f"Retrying segment {i} in {retry_delay} seconds...")
                                     time.sleep(retry_delay)
 
-                        if not success_download:
-                            print(f"Segment {i} still failed after retries. Aborting.")
+                        if not success:
+                            logger.error(f"Failed to download segment {i} after {max_retries} attempts")
                             return False
 
                         segment_files.append(seg_path)
                         seg_pbar.update(1)
 
-                        if success_download:
-                            if progress_queue and i % 10 == 0:  # Update progress every 10 segments
-                                progress = (i + 1) / len(playlist.segments) * 100
-                                progress_queue.put(f"Download progress: {progress:.1f}% ({i + 1}/{len(playlist.segments)})")
+                        if progress_queue and i % 10 == 0:
+                            progress = (i + 1) / len(playlist.segments) * 100
+                            progress_queue.put(f"Download progress: {progress:.1f}% ({i + 1}/{len(playlist.segments)})")
 
+                # Merge segments
+                logger.info(f"Merging {len(segment_files)} segments for post {input_post_id}")
                 with open(ts_file, 'wb') as outfile:
                     for seg_file in segment_files:
                         with open(seg_file, 'rb') as infile:
                             outfile.write(infile.read())
 
+                # Verify merged file
                 if not os.path.exists(ts_file) or os.path.getsize(ts_file) == 0:
-                    print("Merged TS file missing or empty. Aborting.")
+                    logger.error("Merged TS file is missing or empty")
                     return False
 
+                # Convert to MP4
                 try:
-                    print(f"Converting merged TS to MP4 for post ID {input_post_id}...")
-                    convert_result = subprocess.run(
+                    logger.info(f"Converting to MP4: {output_file}")
+                    result = subprocess.run(
                         ["ffmpeg", "-y", "-i", ts_file, "-c", "copy", output_file],
-                        check=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=600
+                        capture_output=True,
+                        text=True,
+                        check=True
                     )
 
+                    # Verify final file
                     if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                        # Cleanup
                         os.remove(ts_file)
                         for seg_file in segment_files:
-                            os.remove(seg_file)
-                        os.rmdir(temp_folder)
-                        print(f"Successfully downloaded and converted post ID {input_post_id}.")
+                            try:
+                                os.remove(seg_file)
+                            except OSError:
+                                pass
+                        try:
+                            os.rmdir(temp_folder)
+                        except OSError:
+                            pass
+
+                        logger.info(f"Successfully completed download for {input_post_id}")
                         if download_state:
                             download_state.mark_completed(input_post_id)
                         return True
 
-                except subprocess.TimeoutExpired:
-                    print("FFmpeg conversion timed out.")
                 except subprocess.CalledProcessError as e:
-                    print(f"FFmpeg error during conversion: {e}")
+                    logger.error(f"FFmpeg conversion failed: {e.stderr}")
+                    return False
 
             except Exception as e:
-                print(f"Error processing M3U8 or merging segments for post ID {input_post_id}: {e}")
+                logger.error(f"Error in download attempt {attempt + 1}: {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
 
-            if attempt < max_retries - 1:
-                print(f"Retrying the entire M3U8 download process in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-
-        print(f"Failed to process post ID {input_post_id} after {max_retries} overall attempts.")
-        if download_state:
-            download_state.mark_failed(input_post_id, "Conversion failed")
         return False
 
     except Exception as e:
-        print(f"Unexpected error for post ID {input_post_id}: {e}")
-        if download_state:
-            download_state.mark_failed(input_post_id, str(e))
+        logger.exception(f"Unexpected error in DL_File for {input_post_id}: {str(e)}")
         return False
 
 def segment_uri_is_absolute(uri: str) -> bool:
@@ -307,7 +293,12 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
         # Get video URL and validate
         video_url = resolution_info[selected_resolution]["url"]
         if not video_url:
-            logger.error(f"No video URL found for post {input_post_id} at resolution {selected_resolution}")
+            logger.error(f"No video URL found for post {input_post_id}")
+            return False
+            
+        # Validate URL before attempting download
+        if not validate_video_url(video_url, headers):
+            logger.error(f"Video URL validation failed for post {input_post_id}")
             return False
 
         # Log video URL (masked for security)
@@ -977,6 +968,34 @@ def handle_image_download(post_id, session, headers, output_dir, filename_config
             progress_queue.put(error)
         return False
 
+def validate_video_url(url, headers):
+    """Validate video URL is accessible"""
+    try:
+        # Check if URL is accessible
+        session = requests.Session()
+        response = session.head(
+            url, 
+            headers=headers,
+            allow_redirects=True,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"URL validation failed with status code {response.status_code}: {url}")
+            return False
+            
+        # Check content type
+        content_type = response.headers.get('content-type', '')
+        if not any(t in content_type.lower() for t in ['video', 'application/vnd.apple.mpegurl', 'application/x-mpegurl']):
+            logger.error(f"Invalid content type for video: {content_type}")
+            return False
+            
+        return True
+        
+    except Exception as e:
+        logger.error(f"URL validation error: {str(e)}")
+        return False
+
 def main():
     session = requests.Session()
     config_file_path = 'config.ini'
@@ -1148,3 +1167,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+``` 
