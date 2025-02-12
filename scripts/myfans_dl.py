@@ -83,27 +83,21 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                     progress_queue.put(message)
                 os.remove(output_file)
 
-        # Create output directory if it doesn't exist
+        # Setup directories
         output_folder = os.path.dirname(output_file)
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-
         ts_file = output_file.replace('.mp4', '.ts')
         temp_folder = output_file.replace('.mp4', '.ts_parts')
-        if not os.path.exists(temp_folder):
-            os.makedirs(temp_folder)
+        
+        os.makedirs(output_folder, exist_ok=True)
+        os.makedirs(temp_folder, exist_ok=True)
 
+        # Setup session with headers
         headers = read_headers_from_file("header.txt")
         session = requests.Session()
         session.headers.update(headers)
 
         for attempt in range(max_retries):
             try:
-                message = f"Parsing M3U8 for post ID {input_post_id} (attempt {attempt+1}/{max_retries})..."
-                logger.info(message)
-                if progress_queue:
-                    progress_queue.put(message)
-
                 # Get master playlist
                 logger.info(f"Fetching master M3U8 from URL: {m3u8_url_download}")
                 response = session.get(m3u8_url_download, timeout=30)
@@ -113,145 +107,106 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                 # Parse master playlist
                 master_playlist = m3u8.loads(master_content)
                 if not master_playlist.playlists:
-                    logger.error(f"No variants found in master playlist for post {input_post_id}")
-                    logger.error(f"Master playlist content:\n{master_content}")
-                    return False
+                    logger.error(f"No variants found in master playlist")
+                    continue
 
-                # Get the highest quality variant
-                variant = master_playlist.playlists[0]
-                variant_uri = variant.uri
+                # Get highest quality variant
+                variant = sorted(master_playlist.playlists, 
+                               key=lambda x: x.stream_info.bandwidth if x.stream_info else 0,
+                               reverse=True)[0]
                 
-                # Construct full URL for variant playlist
+                # Get variant playlist URL
                 base_uri = os.path.dirname(m3u8_url_download)
-                variant_url = urljoin(base_uri + '/', variant_uri)
-                
-                logger.info(f"Fetching variant playlist from: {variant_url}")
-                
+                variant_url = urljoin(f"{base_uri}/", variant.uri)
+                logger.info(f"Using variant URL: {variant_url}")
+
                 # Get variant playlist
                 response = session.get(variant_url, timeout=30)
                 response.raise_for_status()
                 variant_content = response.text
-                
+
                 # Parse variant playlist
                 playlist = m3u8.loads(variant_content)
-                
-                if not playlist or not playlist.segments:
-                    logger.error(f"No segments found in variant playlist for post {input_post_id}")
-                    logger.error(f"Variant playlist content:\n{variant_content}")
-                    return False
+                playlist.base_uri = os.path.dirname(variant_url) + '/'
 
-                # Continue with existing segment download logic...
-                logger.info(f"Found {len(playlist.segments)} segments for post {input_post_id}")
-                
-                # Rest of the function remains the same...
+                if not playlist.segments:
+                    logger.error(f"No segments found in variant playlist")
+                    continue
 
-                logger.debug(f"First segment URL: {playlist.segments[0].uri if playlist.segments else 'No segments'}")
-                logger.debug(f"Using headers: {headers}")
+                logger.info(f"Found {len(playlist.segments)} segments")
 
-                message = f"Found {len(playlist.segments)} segment(s) for post {input_post_id}"
-                logger.info(message)
-                if progress_queue:
-                    progress_queue.put(message)
-
+                # Download segments
                 segment_files = []
-                with tqdm(total=len(playlist.segments), desc=f"Segments for {input_post_id}", unit="seg") as seg_pbar:
-                    base_uri = playlist.base_uri or os.path.dirname(m3u8_url_download) + '/'
-
-                    if download_state:
-                        download_state.add_download(input_post_id, segments_total=len(playlist.segments))
-
+                with tqdm(total=len(playlist.segments), desc=f"Downloading {input_post_id}") as pbar:
                     for i, segment in enumerate(playlist.segments):
-                        if download_state:
-                            download_state.update_progress(input_post_id, i)
-
-                        segment_url = urljoin(base_uri, segment.uri) if not segment.uri.startswith(('http://', 'https://')) else segment.uri
-                        seg_path = os.path.join(temp_folder, f"segment_{i}.ts")
-
-                        success = False
-                        for seg_attempt in range(max_retries):
+                        seg_url = urljoin(playlist.base_uri, segment.uri)
+                        seg_path = os.path.join(temp_folder, f"segment_{i:05d}.ts")
+                        
+                        # Try to download segment
+                        for seg_retry in range(3):
                             try:
-                                response = requests.get(segment_url, stream=True, timeout=30)
+                                response = session.get(seg_url, timeout=30)
                                 response.raise_for_status()
                                 
                                 with open(seg_path, 'wb') as f:
-                                    for chunk in response.iter_content(chunk_size=chunk_size):
-                                        if chunk:
-                                            f.write(chunk)
+                                    f.write(response.content)
                                 
                                 if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
-                                    success = True
+                                    segment_files.append(seg_path)
+                                    pbar.update(1)
                                     break
-                                    
                             except Exception as e:
-                                logger.error(f"Error downloading segment {i}: {str(e)}")
-                                if seg_attempt < max_retries - 1:
-                                    time.sleep(retry_delay)
-
-                        if not success:
-                            logger.error(f"Failed to download segment {i} after {max_retries} attempts")
-                            return False
-
-                        segment_files.append(seg_path)
-                        seg_pbar.update(1)
-
-                        if progress_queue and i % 10 == 0:
-                            progress = (i + 1) / len(playlist.segments) * 100
-                            progress_queue.put(f"Download progress: {progress:.1f}% ({i + 1}/{len(playlist.segments)})")
+                                logger.error(f"Segment download error (attempt {seg_retry + 1}): {str(e)}")
+                                if seg_retry == 2:  # Last attempt failed
+                                    raise
+                                time.sleep(1)
 
                 # Merge segments
-                logger.info(f"Merging {len(segment_files)} segments for post {input_post_id}")
+                logger.info("Merging segments...")
                 with open(ts_file, 'wb') as outfile:
                     for seg_file in segment_files:
                         with open(seg_file, 'rb') as infile:
                             outfile.write(infile.read())
 
-                # Verify merged file
-                if not os.path.exists(ts_file) or os.path.getsize(ts_file) == 0:
-                    logger.error("Merged TS file is missing or empty")
-                    return False
-
                 # Convert to MP4
-                try:
-                    logger.info(f"Converting to MP4: {output_file}")
-                    result = subprocess.run(
-                        ["ffmpeg", "-y", "-i", ts_file, "-c", "copy", output_file],
-                        capture_output=True,
-                        text=True,
-                        check=True
-                    )
+                logger.info("Converting to MP4...")
+                result = subprocess.run(
+                    ["ffmpeg", "-y", "-i", ts_file, "-c", "copy", output_file],
+                    capture_output=True,
+                    text=True
+                )
 
-                    # Verify final file
-                    if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                        # Cleanup
+                if result.returncode != 0:
+                    logger.error(f"FFmpeg error: {result.stderr}")
+                    continue
+
+                # Verify final file
+                if verify_video_file(output_file):
+                    # Cleanup
+                    if os.path.exists(ts_file):
                         os.remove(ts_file)
-                        for seg_file in segment_files:
-                            try:
-                                os.remove(seg_file)
-                            except OSError:
-                                pass
+                    for seg_file in segment_files:
                         try:
-                            os.rmdir(temp_folder)
+                            os.remove(seg_file)
                         except OSError:
                             pass
-
-                        logger.info(f"Successfully completed download for {input_post_id}")
-                        if download_state:
-                            download_state.mark_completed(input_post_id)
-                        return True
-
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"FFmpeg conversion failed: {e.stderr}")
-                    return False
+                    try:
+                        os.rmdir(temp_folder)
+                    except OSError:
+                        pass
+                    
+                    logger.info(f"Successfully downloaded {input_post_id}")
+                    return True
 
             except Exception as e:
-                logger.error(f"Error in download attempt {attempt + 1}: {str(e)}")
+                logger.error(f"Download attempt {attempt + 1} failed: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
 
         return False
 
     except Exception as e:
-        logger.exception(f"Unexpected error in DL_File for {input_post_id}: {str(e)}")
+        logger.exception(f"Fatal error in DL_File: {str(e)}")
         return False
 
 def segment_uri_is_absolute(uri: str) -> bool:
@@ -633,35 +588,11 @@ def start_download(username, post_type, download_type, progress_queue, download_
                 filtered_posts = video_posts
 
             # Check which files already exist
-            existing_files = []
-            missing_files = []
-            
-            for post in filtered_posts:
-                post_id = post.get("id")
-                filename = generate_filename(post, filename_config, output_dir)
-                full_path = os.path.join(output_dir, post['user']['username'], "videos", filename)
-                
-                if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
-                    existing_files.append(post_id)
-                    message = f"Skipping existing file: {filename}"
-                    logger.info(message)
-                    progress_queue.put(message)
-                else:
-                    missing_files.append(post_id)
+            existing_files, missing_files = check_existing_files(filtered_posts, output_dir, filename_config)
 
             message = f"Found {len(existing_files)} existing files, {len(missing_files)} files to download"
             logger.info(message)
             progress_queue.put(message)
-
-            # Estimate required space (rough estimate)
-            estimated_size_per_video = 100 * 1024 * 1024  # 100MB per video
-            required_space = len(missing_files) * estimated_size_per_video
-            
-            if not check_disk_space(output_dir, required_space):
-                error = f"Not enough disk space. Need approximately {required_space//(1024*1024)}MB"
-                logger.error(error)
-                progress_queue.put(error)
-                return
 
             if missing_files:
                 message = f"Starting download of {len(missing_files)} missing files..."
