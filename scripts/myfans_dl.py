@@ -1047,51 +1047,63 @@ def check_existing_files(filtered_posts: List[Dict], output_dir: str, filename_c
             
     return existing_files, missing_files
 
-def generate_filename(post_data: Dict, filename_config: Dict, output_dir: str) -> str:
-    """Generate filename for a post based on configuration"""
+def generate_filename(post: Dict, filename_config: Dict, output_dir: str) -> str:
+    """Generate a unique filename for the video"""
+    username = post.get('user', {}).get('username', 'unknown')
+    post_id = post.get('id', 'unknown')
+    
+    # Try to get the date from posted_at
+    try:
+        post_date = post.get('posted_at', '').split('T')[0]
+        if not post_date or post_date == '':
+            post_date = f"unknown_date_{post_id[:8]}"  # Use part of post ID to make it unique
+    except:
+        post_date = f"unknown_date_{post_id[:8]}"
+    
+    # Get title or use part of post ID
+    title = post.get('title', '')
+    if not title or title.strip() == '':
+        title = post_id[:8]  # Use first 8 chars of post ID as title
+        
+    # Clean the title
+    title = clean_filename(title)
+    
+    # Get separator
+    separator = filename_config.get('separator', '_')
+    
+    # Generate filename based on pattern
     pattern = filename_config.get('pattern', '{creator}_{date}_{id}')
-    
-    # Get creator name
-    creator = post_data.get('user', {}).get('username', 'unknown')
-    
-    # Get post date
-    post_date = post_data.get('posted_at', '').split('T')[0] if post_data.get('posted_at') else 'unknown_date'
-    
-    # Get post ID
-    post_id = post_data.get('id', 'unknown_id')
-    
-    # Create filename
     filename = pattern.format(
-        creator=creator,
+        creator=username,
         date=post_date,
+        title=title,
         id=post_id
     )
     
-    # Add extension
-    filename = f"{filename}.mp4"
-    
-    # Sanitize filename
-    filename = sanitize_filename(filename)
-    
-    return filename
+    # Ensure filename is unique by adding post ID if not already present
+    if post_id not in filename:
+        filename = f"{filename}_{post_id[:8]}"
+        
+    return f"{filename}.mp4"
 
-def sanitize_filename(filename: str) -> str:
-    """Remove invalid characters from filename"""
-    # Remove invalid characters
+def clean_filename(filename: str) -> str:
+    """Clean a string to make it safe for filenames"""
+    # Replace problematic characters
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
         filename = filename.replace(char, '_')
     
-    # Replace multiple underscores with single underscore
-    while '__' in filename:
-        filename = filename.replace('__', '_')
+    # Remove or replace other problematic characters
+    filename = re.sub(r'[\x00-\x1f]', '', filename)
+    filename = filename.strip('. ')  # Remove leading/trailing dots and spaces
     
-    # Trim length if needed (max 255 characters)
-    if len(filename) > 255:
+    # Limit length
+    max_length = 100
+    if len(filename) > max_length:
         name, ext = os.path.splitext(filename)
-        filename = name[:255-len(ext)] + ext
+        filename = name[:max_length-len(ext)] + ext
         
-    return filename
+    return filename if filename else 'unnamed'
 
 def read_filename_config(config: configparser.ConfigParser) -> Dict:
     """Read filename configuration from config file"""
