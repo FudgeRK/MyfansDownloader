@@ -104,34 +104,38 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                 if progress_queue:
                     progress_queue.put(message)
                     
-                # Add detailed M3U8 debug logging
-                logger.info(f"Loading M3U8 from URL: {m3u8_url_download}")
-                
-                # Initialize session once with headers
+                # Initialize session with headers
                 headers = read_headers_from_file("header.txt")
                 session = requests.Session()
                 session.headers.update(headers)
 
                 # Get M3U8 content
                 try:
+                    logger.info(f"Fetching M3U8 from URL: {m3u8_url_download}")
                     response = session.get(m3u8_url_download, timeout=30)
+                    
+                    # Log response details
+                    logger.info(f"Response status code: {response.status_code}")
+                    logger.info(f"Response headers: {dict(response.headers)}")
+                    
                     response.raise_for_status()
                     m3u8_content = response.text
+                    
+                    # Log M3U8 content (first few lines)
+                    content_preview = '\n'.join(m3u8_content.splitlines()[:5])
+                    logger.info(f"M3U8 content preview:\n{content_preview}")
                     
                     # Parse M3U8
                     playlist = m3u8.loads(m3u8_content)
                     
                     if not playlist or not playlist.segments:
                         logger.error(f"No segments found in M3U8 for post {input_post_id}")
+                        logger.error(f"Full M3U8 content:\n{m3u8_content}")
                         return False
-                        
-                    # Use same session for segment downloads
-                    base_uri = playlist.base_uri or os.path.dirname(m3u8_url_download) + '/'
-                    
-                    # Continue with segment downloads using the same session...
 
                 except Exception as e:
                     logger.error(f"Failed to fetch M3U8 content: {str(e)}")
+                    logger.error(f"Full error details: {repr(e)}")
                     return False
 
                 if not playlist or not playlist.segments:
