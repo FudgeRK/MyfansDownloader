@@ -1,7 +1,8 @@
 import os
 import sys
 import time
-import json  # Add missing import
+import json
+from queue import Queue, Empty
 import requests
 import subprocess
 import configparser
@@ -260,11 +261,6 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
                 progress_queue.put(message)
             return False
 
-        # Add debug logging for video URL
-        video_url = resolution_info[selected_resolution]["url"]
-        logger.debug(f"Video URL before download: {video_url}")
-        logger.debug(f"Headers being used: {headers}")
-
         # Log available resolutions
         if resolution_info:
             logger.info(f"Available resolutions for post {input_post_id}: {list(resolution_info.keys())}")
@@ -280,24 +276,15 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
                 progress_queue.put(message)
             return False
 
-        # Check access level with detailed logging
-        logger.info(f"Post {input_post_id} - Free: {data.get('free')}, Subscribed: {data.get('subscribed')}")
-        if data.get('free') is False and not data.get('subscribed'):
-            message = f"No access to post ID {input_post_id} (subscription required)"
-            logger.error(message)
-            if progress_queue:
-                progress_queue.put(message)
-            return False
-
         # Select resolution with fallback logging
         if selected_resolution == 'best':
-            original_resolution = selected_resolution
             for res in ['fhd', 'hd', 'sd', 'ld']:
                 if res in resolution_info:
                     selected_resolution = res
                     logger.info(f"Selected best available resolution for post {input_post_id}: {res}")
                     break
-        
+
+        # Verify selected resolution exists
         if selected_resolution not in resolution_info:
             available = ', '.join(resolution_info.keys())
             message = f"Resolution {selected_resolution} not available for post {input_post_id}. Available: {available}"
@@ -317,12 +304,25 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
                 logger.error(f"No valid resolution found for post {input_post_id}")
                 return False
 
-        # Get video URL and validate
-        video_url = resolution_info[selected_resolution]["url"]
+        # Get video URL
+        video_url = resolution_info[selected_resolution].get("url")
         if not video_url:
             logger.error(f"No video URL found for post {input_post_id}")
             return False
-            
+
+        # Log video URL (masked for security)
+        masked_url = video_url[:30] + "..." + video_url[-30:] if len(video_url) > 60 else video_url
+        logger.info(f"Video URL for post {input_post_id}: {masked_url}")
+
+        # Check access level with detailed logging
+        logger.info(f"Post {input_post_id} - Free: {data.get('free')}, Subscribed: {data.get('subscribed')}")
+        if data.get('free') is False and not data.get('subscribed'):
+            message = f"No access to post ID {input_post_id} (subscription required)"
+            logger.error(message)
+            if progress_queue:
+                progress_queue.put(message)
+            return False
+
         # Validate URL before attempting download
         if not validate_video_url(video_url, headers):
             logger.error(f"Video URL validation failed for post {input_post_id}")

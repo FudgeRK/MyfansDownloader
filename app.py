@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, Response
 import scripts.myfans_dl as downloader
 from scripts.download_state import DownloadState
-from queue import Queue, Empty  # Add Empty here
+from queue import Queue, Empty  # Add both Queue and Empty
 import threading
 import logging
 import os
