@@ -116,6 +116,9 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                     logger.error(f"M3U8 parsing error for post {input_post_id}: {str(e)}")
                     return False
 
+                logger.debug(f"First segment URL: {playlist.segments[0].uri if playlist.segments else 'No segments'}")
+                logger.debug(f"Using headers: {headers}")
+
                 message = f"Found {len(playlist.segments)} segment(s) for post {input_post_id}"
                 logger.info(message)
                 if progress_queue:
