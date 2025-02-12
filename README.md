@@ -67,7 +67,7 @@ docker compose up
 
 ```bash
 docker run -it \
-  -e FILENAME_PATTERN="{creator}_{date}_{title}" \
+  -e FILENAME_PATTERN="{creator}_{date}_{id}" \
   -e FILENAME_SEPARATOR="_" \
   -e THREAD_COUNT="10" \
   -v $(pwd)/config:/config \
