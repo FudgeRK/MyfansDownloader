@@ -994,6 +994,126 @@ def validate_video_url(url, headers):
         logger.error(f"URL validation error: {str(e)}")
         return False
 
+def check_existing_files(filtered_posts: List[Dict], output_dir: str, filename_config: Dict) -> Tuple[List[str], List[str]]:
+    """
+    Check which files already exist and verify their integrity.
+    Returns tuple of (existing_files, missing_files) where each is a list of post IDs.
+    """
+    existing_files = []
+    missing_files = []
+    
+    for post in filtered_posts:
+        post_id = post.get('id')
+        if not post_id:
+            continue
+            
+        # Generate filename and full path
+        filename = generate_filename(post, filename_config, output_dir)
+        output_folder = os.path.join(output_dir, post['user']['username'], "videos")
+        full_path = os.path.join(output_folder, filename)
+        
+        if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
+            if verify_video_file(full_path):
+                existing_files.append(post_id)
+                logger.info(f"Found existing verified file: {filename}")
+            else:
+                missing_files.append(post_id)
+                logger.warning(f"Found corrupted file, will redownload: {filename}")
+                try:
+                    os.remove(full_path)
+                except OSError as e:
+                    logger.error(f"Error removing corrupted file: {e}")
+        else:
+            missing_files.append(post_id)
+            
+    return existing_files, missing_files
+
+def generate_filename(post_data: Dict, filename_config: Dict, output_dir: str) -> str:
+    """Generate filename for a post based on configuration"""
+    pattern = filename_config.get('pattern', '{creator}_{date}_{id}')
+    
+    # Get creator name
+    creator = post_data.get('user', {}).get('username', 'unknown')
+    
+    # Get post date
+    post_date = post_data.get('posted_at', '').split('T')[0] if post_data.get('posted_at') else 'unknown_date'
+    
+    # Get post ID
+    post_id = post_data.get('id', 'unknown_id')
+    
+    # Create filename
+    filename = pattern.format(
+        creator=creator,
+        date=post_date,
+        id=post_id
+    )
+    
+    # Add extension
+    filename = f"{filename}.mp4"
+    
+    # Sanitize filename
+    filename = sanitize_filename(filename)
+    
+    return filename
+
+def sanitize_filename(filename: str) -> str:
+    """Remove invalid characters from filename"""
+    # Remove invalid characters
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        filename = filename.replace(char, '_')
+    
+    # Replace multiple underscores with single underscore
+    while '__' in filename:
+        filename = filename.replace('__', '_')
+    
+    # Trim length if needed (max 255 characters)
+    if len(filename) > 255:
+        name, ext = os.path.splitext(filename)
+        filename = name[:255-len(ext)] + ext
+        
+    return filename
+
+def read_filename_config(config: configparser.ConfigParser) -> Dict:
+    """Read filename configuration from config file"""
+    try:
+        filename_config = {
+            'pattern': config.get('Filename', 'pattern', fallback='{creator}_{date}_{id}'),
+            'separator': config.get('Filename', 'separator', fallback='_'),
+            'numbers': config.get('Filename', 'numbers', fallback=''),
+            'letters': config.get('Filename', 'letters', fallback='')
+        }
+        return filename_config
+    except Exception as e:
+        logger.error(f"Error reading filename config: {e}")
+        return {
+            'pattern': '{creator}_{date}_{id}',
+            'separator': '_',
+            'numbers': '',
+            'letters': ''
+        }
+
+def validate_filename_config(filename_config: Dict) -> bool:
+    """Validate filename configuration"""
+    required_keys = ['pattern', 'separator']
+    
+    # Check for required keys
+    for key in required_keys:
+        if key not in filename_config:
+            logger.error(f"Missing required key in filename config: {key}")
+            return False
+            
+    # Validate pattern
+    pattern = filename_config['pattern']
+    required_fields = ['{creator}', '{date}', '{id}']
+    
+    for field in required_fields:
+        if field not in pattern:
+            logger.error(f"Missing required field in filename pattern: {field}")
+            return False
+            
+    return True
+
 def main():
     session = requests.Session()
     config_file_path = 'config.ini'
