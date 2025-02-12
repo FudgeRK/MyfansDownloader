@@ -70,12 +70,12 @@ def progress():
     def generate():
         while True:
             try:
-                progress = progress_queue.get(timeout=1)  # Add timeout
+                progress = progress_queue.get(timeout=1)
                 if progress == "DONE":
                     break
                 yield f"data: {progress}\n\n"
-            except queue.Empty:
-                continue  # Keep connection alive
+            except Empty:
+                continue
             except Exception as e:
                 logger.error(f"Error in progress stream: {e}")
                 break
