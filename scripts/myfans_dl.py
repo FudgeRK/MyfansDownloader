@@ -3,7 +3,6 @@ import sys
 import time
 import json
 from queue import Queue, Empty
-import requests
 import subprocess
 import configparser
 from tqdm import tqdm
@@ -11,8 +10,11 @@ from scripts.filename_utils import *
 import concurrent.futures
 import threading
 import m3u8
-from urllib.parse import urljoin
 import logging
+from typing import Optional, List, Dict, Any, Tuple
+from urllib.parse import urljoin
+import requests
+from requests import Session
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,6 +60,18 @@ def verify_video_file(file_path):
         return result.returncode == 0
     except Exception:
         return False
+
+def safe_urljoin(base: str, url: str) -> str:
+    """Safely join URL parts ensuring no None values"""
+    if not base or not url:
+        raise ValueError("Base URL and URL parts must not be None")
+    return urljoin(base, url)
+
+def make_request(session: requests.Session, url: str, headers: dict, timeout: int = 30) -> requests.Response:
+    """Make a request ensuring proper type safety"""
+    if not url:
+        raise ValueError("URL cannot be None")
+    return session.get(url, headers=headers, timeout=timeout)
 
 def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024, max_retries=3, retry_delay=5, progress_queue=None, download_state=None):
     try:
@@ -106,19 +120,25 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
 
                 # Parse master playlist
                 master_playlist = m3u8.loads(master_content)
+                master_playlist.base_uri = os.path.dirname(m3u8_url_download) + '/'
+
                 if not master_playlist.playlists:
                     logger.error(f"No variants found in master playlist")
                     continue
 
                 # Get highest quality variant
-                variant = sorted(master_playlist.playlists, 
-                               key=lambda x: x.stream_info.bandwidth if x.stream_info else 0,
-                               reverse=True)[0]
-                
+                variant = sorted(
+                    [p for p in master_playlist.playlists if p.stream_info and p.stream_info.bandwidth],
+                    key=lambda x: x.stream_info.bandwidth,
+                    reverse=True
+                )[0]
+
                 # Get variant playlist URL
                 base_uri = os.path.dirname(m3u8_url_download)
-                variant_url = urljoin(f"{base_uri}/", variant.uri)
-                logger.info(f"Using variant URL: {variant_url}")
+                if not base_uri:
+                    base_uri = m3u8_url_download
+                variant_url = safe_urljoin(base_uri + '/', variant.uri if variant.uri else '')
+                logger.info(f"Fetching variant playlist from: {variant_url}")
 
                 # Get variant playlist
                 response = session.get(variant_url, timeout=30)
@@ -133,33 +153,36 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                     logger.error(f"No segments found in variant playlist")
                     continue
 
-                logger.info(f"Found {len(playlist.segments)} segments")
+                logger.info(f"Found {len(playlist.segments)} segments for post {input_post_id}")
 
                 # Download segments
                 segment_files = []
-                with tqdm(total=len(playlist.segments), desc=f"Downloading {input_post_id}") as pbar:
+                with tqdm(total=len(playlist.segments), desc=f"Segments for {input_post_id}") as pbar:
                     for i, segment in enumerate(playlist.segments):
-                        seg_url = urljoin(playlist.base_uri, segment.uri)
+                        if not segment.uri:
+                            logger.error(f"Invalid segment {i}: missing URI")
+                            continue
+
                         seg_path = os.path.join(temp_folder, f"segment_{i:05d}.ts")
-                        
-                        # Try to download segment
+
+                        # Try to download segment with retries
                         for seg_retry in range(3):
                             try:
-                                response = session.get(seg_url, timeout=30)
-                                response.raise_for_status()
-                                
+                                seg_url = safe_urljoin(playlist.base_uri, segment.uri) if not segment_uri_is_absolute(segment.uri) else segment.uri
+                                response = make_request(session, seg_url, headers)
+
                                 with open(seg_path, 'wb') as f:
                                     f.write(response.content)
-                                
+
                                 if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
                                     segment_files.append(seg_path)
                                     pbar.update(1)
                                     break
                             except Exception as e:
-                                logger.error(f"Segment download error (attempt {seg_retry + 1}): {str(e)}")
-                                if seg_retry == 2:  # Last attempt failed
+                                logger.error(f"Error downloading segment {i}: {str(e)}")
+                                if seg_retry == 2:  # Last attempt
                                     raise
-                                time.sleep(1)
+                                time.sleep(retry_delay)
 
                 # Merge segments
                 logger.info("Merging segments...")
