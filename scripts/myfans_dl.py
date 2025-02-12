@@ -103,17 +103,36 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                 if progress_queue:
                     progress_queue.put(message)
                     
-                # Load M3U8 with detailed error handling
+                # Add detailed M3U8 debug logging
+                logger.info(f"Loading M3U8 from URL: {m3u8_url_download}")
+                
+                # Get headers from file
+                headers = read_headers_from_file("header.txt")
+                logger.debug(f"Using headers: {headers}")
+
+                # Create session with headers
+                session = requests.Session()
+                session.headers.update(headers)
+
+                # Try to get M3U8 content first
                 try:
-                    playlist = m3u8.load(m3u8_url_download)
-                    if not playlist or not playlist.segments:
-                        error = f"Invalid M3U8 playlist for post {input_post_id}"
-                        logger.error(error)
-                        if progress_queue:
-                            progress_queue.put(error)
-                        return False
+                    response = session.get(m3u8_url_download, timeout=30)
+                    response.raise_for_status()
+                    m3u8_content = response.text
+                    logger.debug(f"M3U8 content: {m3u8_content[:200]}...")  # Log first 200 chars
+                    
+                    # Load M3U8 from content
+                    playlist = m3u8.loads(m3u8_content)
+                    
                 except Exception as e:
-                    logger.error(f"M3U8 parsing error for post {input_post_id}: {str(e)}")
+                    logger.error(f"Failed to fetch M3U8 content: {str(e)}")
+                    return False
+
+                if not playlist or not playlist.segments:
+                    error = f"Invalid M3U8 playlist for post {input_post_id}"
+                    logger.error(error)
+                    if progress_queue:
+                        progress_queue.put(error)
                     return False
 
                 logger.debug(f"First segment URL: {playlist.segments[0].uri if playlist.segments else 'No segments'}")
@@ -239,7 +258,12 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
             logger.error(message)
             if progress_queue:
                 progress_queue.put(message)
-            return False  # Changed to False since this is an error
+            return False
+
+        # Add debug logging for video URL
+        video_url = resolution_info[selected_resolution]["url"]
+        logger.debug(f"Video URL before download: {video_url}")
+        logger.debug(f"Headers being used: {headers}")
 
         # Log available resolutions
         if resolution_info:
