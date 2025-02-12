@@ -60,10 +60,6 @@ def verify_video_file(file_path):
         return False
 
 def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024, max_retries=3, retry_delay=5, progress_queue=None, download_state=None):
-    """
-    Parses the M3U8 playlist, downloads each TS segment individually, merges them into .ts,
-    and converts to MP4 with FFmpeg.
-    """
     try:
         # Add M3U8 URL validation
         if not m3u8_url_download:
@@ -97,53 +93,57 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
         if not os.path.exists(temp_folder):
             os.makedirs(temp_folder)
 
+        headers = read_headers_from_file("header.txt")
+        session = requests.Session()
+        session.headers.update(headers)
+
         for attempt in range(max_retries):
             try:
                 message = f"Parsing M3U8 for post ID {input_post_id} (attempt {attempt+1}/{max_retries})..."
                 logger.info(message)
                 if progress_queue:
                     progress_queue.put(message)
-                    
-                # Initialize session with headers
-                headers = read_headers_from_file("header.txt")
-                session = requests.Session()
-                session.headers.update(headers)
 
-                # Get M3U8 content
-                try:
-                    logger.info(f"Fetching M3U8 from URL: {m3u8_url_download}")
-                    response = session.get(m3u8_url_download, timeout=30)
-                    
-                    # Log response details
-                    logger.info(f"Response status code: {response.status_code}")
-                    logger.info(f"Response headers: {dict(response.headers)}")
-                    
-                    response.raise_for_status()
-                    m3u8_content = response.text
-                    
-                    # Log M3U8 content (first few lines)
-                    content_preview = '\n'.join(m3u8_content.splitlines()[:5])
-                    logger.info(f"M3U8 content preview:\n{content_preview}")
-                    
-                    # Parse M3U8
-                    playlist = m3u8.loads(m3u8_content)
-                    
-                    if not playlist or not playlist.segments:
-                        logger.error(f"No segments found in M3U8 for post {input_post_id}")
-                        logger.error(f"Full M3U8 content:\n{m3u8_content}")
-                        return False
+                # Get master playlist
+                logger.info(f"Fetching master M3U8 from URL: {m3u8_url_download}")
+                response = session.get(m3u8_url_download, timeout=30)
+                response.raise_for_status()
+                master_content = response.text
 
-                except Exception as e:
-                    logger.error(f"Failed to fetch M3U8 content: {str(e)}")
-                    logger.error(f"Full error details: {repr(e)}")
+                # Parse master playlist
+                master_playlist = m3u8.loads(master_content)
+                if not master_playlist.playlists:
+                    logger.error(f"No variants found in master playlist for post {input_post_id}")
+                    logger.error(f"Master playlist content:\n{master_content}")
                     return False
 
+                # Get the highest quality variant
+                variant = master_playlist.playlists[0]
+                variant_uri = variant.uri
+                
+                # Construct full URL for variant playlist
+                base_uri = os.path.dirname(m3u8_url_download)
+                variant_url = urljoin(base_uri + '/', variant_uri)
+                
+                logger.info(f"Fetching variant playlist from: {variant_url}")
+                
+                # Get variant playlist
+                response = session.get(variant_url, timeout=30)
+                response.raise_for_status()
+                variant_content = response.text
+                
+                # Parse variant playlist
+                playlist = m3u8.loads(variant_content)
+                
                 if not playlist or not playlist.segments:
-                    error = f"Invalid M3U8 playlist for post {input_post_id}"
-                    logger.error(error)
-                    if progress_queue:
-                        progress_queue.put(error)
+                    logger.error(f"No segments found in variant playlist for post {input_post_id}")
+                    logger.error(f"Variant playlist content:\n{variant_content}")
                     return False
+
+                # Continue with existing segment download logic...
+                logger.info(f"Found {len(playlist.segments)} segments for post {input_post_id}")
+                
+                # Rest of the function remains the same...
 
                 logger.debug(f"First segment URL: {playlist.segments[0].uri if playlist.segments else 'No segments'}")
                 logger.debug(f"Using headers: {headers}")
@@ -356,13 +356,20 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
         
         # Check existing file
         if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
-            message = f"File already exists: {filename}"
-            logger.info(message)
-            if progress_queue:
-                progress_queue.put(message)
-            if progress_bar:
-                progress_bar.update(1)
-            return True
+            if verify_video_file(full_path):
+                message = f"File already exists and verified: {filename}"
+                logger.info(message)
+                if progress_queue:
+                    progress_queue.put(message)
+                if progress_bar:
+                    progress_bar.update(1)
+                return True
+            else:
+                message = f"Corrupted file found, will redownload: {filename}"
+                logger.warning(message)
+                if progress_queue:
+                    progress_queue.put(message)
+                os.remove(full_path)
 
         # Create output directory
         os.makedirs(output_folder, exist_ok=True)
