@@ -49,16 +49,17 @@ def get_posts_for_page(base_url, page, headers):
     json_data = response.json()
     return json_data.get("data", [])
 
-def verify_video_file(file_path):
-    """Verify the integrity of downloaded video file"""
+def verify_video_file(file_path: str) -> bool:
+    """Verify if a video file is valid"""
     try:
         result = subprocess.run(
-            ["ffmpeg", "-v", "error", "-i", file_path, "-f", "null", "-"],
+            ["ffprobe", "-v", "error", file_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
         return result.returncode == 0
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error verifying video file {file_path}: {e}")
         return False
 
 def safe_urljoin(base: str, url: str) -> str:
@@ -1007,23 +1008,41 @@ def check_existing_files(filtered_posts: List[Dict], output_dir: str, filename_c
         if not post_id:
             continue
             
-        # Generate filename and full path
-        filename = generate_filename(post, filename_config, output_dir)
-        output_folder = os.path.join(output_dir, post['user']['username'], "videos")
-        full_path = os.path.join(output_folder, filename)
+        # Get post date
+        post_date = post.get('posted_at', '').split('T')[0] if post.get('posted_at') else 'unknown_date'
         
-        if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
-            if verify_video_file(full_path):
-                existing_files.append(post_id)
-                logger.info(f"Found existing verified file: {filename}")
-            else:
-                missing_files.append(post_id)
-                logger.warning(f"Found corrupted file, will redownload: {filename}")
-                try:
-                    os.remove(full_path)
-                except OSError as e:
-                    logger.error(f"Error removing corrupted file: {e}")
-        else:
+        # Get username
+        username = post.get('user', {}).get('username', 'unknown')
+        
+        # Generate possible filenames (both old and new patterns)
+        possible_filenames = [
+            # New pattern with post ID
+            generate_filename(post, filename_config, output_dir),
+            # Old pattern with {title}
+            f"{username}_{post_date}_{{title}}.mp4",
+            f"{username}_{post_date}_{{title}}_1.mp4"  # For split videos
+        ]
+        
+        output_folder = os.path.join(output_dir, username, "videos")
+        
+        # Check if any of the possible filenames exist
+        found_valid_file = False
+        for filename in possible_filenames:
+            full_path = os.path.join(output_folder, filename)
+            if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
+                if verify_video_file(full_path):
+                    existing_files.append(post_id)
+                    logger.info(f"Found existing verified file: {filename}")
+                    found_valid_file = True
+                    break
+                else:
+                    logger.warning(f"Found corrupted file, will redownload: {filename}")
+                    try:
+                        os.remove(full_path)
+                    except OSError as e:
+                        logger.error(f"Error removing corrupted file: {e}")
+        
+        if not found_valid_file:
             missing_files.append(post_id)
             
     return existing_files, missing_files
