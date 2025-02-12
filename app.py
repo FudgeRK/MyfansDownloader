@@ -7,6 +7,7 @@ import logging
 import os
 import requests
 from logging.handlers import RotatingFileHandler
+import configparser
 
 # Configure Flask logging
 log_dir = os.getenv('CONFIG_DIR', '/config')
@@ -103,6 +104,46 @@ def test_post(post_id):
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/settings', methods=['GET', 'POST'])
+def settings():
+    config = configparser.ConfigParser()
+    config_path = os.path.join(os.getenv('CONFIG_DIR', ''), 'config.ini')
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        config['Settings'] = {
+            'filename_pattern': data.get('filename_pattern', '{creator}_{date}_{title}'),
+            'filename_separator': data.get('filename_separator', '_'),
+            'auth_token': data.get('auth_token', ''),
+            'thread_count': data.get('thread_count', '10')
+        }
+        
+        # Save to config.ini
+        with open(config_path, 'w') as f:
+            config.write(f)
+            
+        # Update environment variables
+        os.environ['FILENAME_PATTERN'] = data.get('filename_pattern', '{creator}_{date}_{title}')
+        os.environ['FILENAME_SEPARATOR'] = data.get('filename_separator', '_')
+        os.environ['AUTH_TOKEN'] = data.get('auth_token', '')
+        os.environ['THREAD_COUNT'] = str(data.get('thread_count', 10))
+        
+        return jsonify({'status': 'success'})
+        
+    # GET request - return current settings
+    try:
+        config.read(config_path)
+        settings = {
+            'filename_pattern': os.getenv('FILENAME_PATTERN', config.get('Settings', 'filename_pattern', fallback='{creator}_{date}_{title}')),
+            'filename_separator': os.getenv('FILENAME_SEPARATOR', config.get('Settings', 'filename_separator', fallback='_')),
+            'auth_token': os.getenv('AUTH_TOKEN', config.get('Settings', 'auth_token', fallback='')),
+            'thread_count': int(os.getenv('THREAD_COUNT', config.get('Settings', 'thread_count', fallback='10')))
+        }
+        return jsonify(settings)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
