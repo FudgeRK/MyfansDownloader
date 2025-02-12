@@ -107,24 +107,29 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                 # Add detailed M3U8 debug logging
                 logger.info(f"Loading M3U8 from URL: {m3u8_url_download}")
                 
-                # Get headers from file
+                # Initialize session once with headers
                 headers = read_headers_from_file("header.txt")
-                logger.debug(f"Using headers: {headers}")
-
-                # Create session with headers
                 session = requests.Session()
                 session.headers.update(headers)
 
-                # Try to get M3U8 content first
+                # Get M3U8 content
                 try:
                     response = session.get(m3u8_url_download, timeout=30)
                     response.raise_for_status()
                     m3u8_content = response.text
-                    logger.debug(f"M3U8 content: {m3u8_content[:200]}...")  # Log first 200 chars
                     
-                    # Load M3U8 from content
+                    # Parse M3U8
                     playlist = m3u8.loads(m3u8_content)
                     
+                    if not playlist or not playlist.segments:
+                        logger.error(f"No segments found in M3U8 for post {input_post_id}")
+                        return False
+                        
+                    # Use same session for segment downloads
+                    base_uri = playlist.base_uri or os.path.dirname(m3u8_url_download) + '/'
+                    
+                    # Continue with segment downloads using the same session...
+
                 except Exception as e:
                     logger.error(f"Failed to fetch M3U8 content: {str(e)}")
                     return False
@@ -250,8 +255,7 @@ def segment_uri_is_absolute(uri: str) -> bool:
 
 def process_post_id(input_post_id, session, headers, selected_resolution, output_dir, filename_config, progress_bar=None, progress_queue=None):
     try:
-        # Get video info with detailed logging
-        logger.info(f"Fetching video info for post ID {input_post_id}")
+        # Use the passed session instead of creating new ones
         data, resolution_info, error = get_video_info(input_post_id, session, headers)
         
         if error:
@@ -907,7 +911,6 @@ def get_available_resolutions(main_videos):
     return resolutions
 
 def get_video_info(input_post_id, session, headers):
-    """Get video information including available resolutions"""
     try:
         url = f"https://api.myfans.jp/api/v2/posts/{input_post_id}"
         response = session.get(url, headers=headers)
@@ -917,8 +920,11 @@ def get_video_info(input_post_id, session, headers):
         main_videos = data.get('videos', {}).get('main', [])
         
         if not main_videos:
+            logger.error(f"No video content found for post {input_post_id}")
             return None, None, "No videos found"
             
+        logger.info(f"Found {len(main_videos)} video variants for post {input_post_id}")
+        
         available_resolutions = []
         resolution_info = {}
         
@@ -933,7 +939,11 @@ def get_video_info(input_post_id, session, headers):
                 }
         
         return data, resolution_info, None
+    except requests.RequestException as e:
+        logger.error(f"API request failed for post {input_post_id}: {str(e)}")
+        return None, None, str(e)
     except Exception as e:
+        logger.error(f"Unexpected error for post {input_post_id}: {str(e)}")
         return None, None, str(e)
 
 def handle_image_download(post_id, session, headers, output_dir, filename_config, progress_queue=None):
@@ -998,23 +1008,19 @@ def handle_image_download(post_id, session, headers, output_dir, filename_config
 def validate_video_url(url, headers):
     """Validate video URL is accessible"""
     try:
-        # Check if URL is accessible
         session = requests.Session()
-        response = session.head(
-            url, 
-            headers=headers,
-            allow_redirects=True,
-            timeout=10
-        )
+        session.headers.update(headers)  # Use session with headers
+        
+        response = session.head(url, allow_redirects=True, timeout=10)
         
         if response.status_code != 200:
-            logger.error(f"URL validation failed with status code {response.status_code}: {url}")
+            logger.error(f"URL validation failed with status code {response.status_code}")
             return False
             
-        # Check content type
         content_type = response.headers.get('content-type', '')
-        if not any(t in content_type.lower() for t in ['video', 'application/vnd.apple.mpegurl', 'application/x-mpegurl']):
-            logger.error(f"Invalid content type for video: {content_type}")
+        valid_types = ['video', 'application/vnd.apple.mpegurl', 'application/x-mpegurl']
+        if not any(t in content_type.lower() for t in valid_types):
+            logger.error(f"Invalid content type: {content_type}")
             return False
             
         return True
