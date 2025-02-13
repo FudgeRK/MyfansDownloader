@@ -15,6 +15,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import urljoin
 import requests
 from requests import Session
+import re
 
 logging.basicConfig(
     level=logging.INFO,
