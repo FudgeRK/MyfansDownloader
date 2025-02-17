@@ -193,16 +193,22 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
 
     if main_videos:
         fhd_video = None
+        hd_video = None
         sd_video = None
         for video in main_videos:
             if video["resolution"] == 'fhd':
                 fhd_video = video
+            elif video["resolution"] == 'hd':
+                hd_video = video
             elif video["resolution"] == 'sd':
                 sd_video = video
 
         if fhd_video:
             selected_resolution = 'fhd'
             selected_video = fhd_video
+        elif hd_video:
+            selected_resolution = 'hd'
+            selected_video = hd_video
         elif sd_video:
             selected_resolution = 'sd'
             selected_video = sd_video
@@ -216,6 +222,8 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
         video_base_url, video_extension = os.path.splitext(video_url)
         if selected_resolution == "fhd":
             target_resolution = "1080p"
+        elif selected_resolution == "hd":
+            target_resolution = "720p"
         elif selected_resolution == "sd":
             target_resolution = "480p"
 
@@ -224,6 +232,8 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
 
         if video_url and m3u8_response.status_code == 200 and target_resolution == "1080p":
             m3u8_url_download = f"{video_base_url}/1080p.m3u8"
+        elif video_url and m3u8_response.status_code == 200 and target_resolution == "720p":
+            m3u8_url_download = f"{video_base_url}/720p.m3u8"
         elif video_url and m3u8_response.status_code == 200 and target_resolution == "480p":
             m3u8_url_download = f"{video_base_url}/480p.m3u8"
         else:
