@@ -41,6 +41,24 @@ logger.addHandler(file_handler)
 # Prevent log propagation to avoid duplicate logs
 logger.propagate = False
 
+# Am Anfang der Datei nach den Imports hinzufügen:
+log_lock = threading.Lock()
+
+# Neue Hilfsfunktion für Thread-sicheres Logging
+def thread_safe_log(level, message, progress_queue=None):
+    with log_lock:
+        if level == 'info':
+            logger.info(message)
+        elif level == 'error':
+            logger.error(message)
+        elif level == 'warning':
+            logger.warning(message)
+        elif level == 'debug':
+            logger.debug(message)
+        
+        if progress_queue:
+            progress_queue.put(message)
+
 def read_headers_from_file(filename):
     headers = {}
     config_dir = os.getenv('CONFIG_DIR', '')
@@ -245,10 +263,7 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                                 # Log progress occasionally
                                 if processed_count % 50 == 0 or processed_count == total_segments:
                                     success_rate = len([f for f in segment_files if f]) / processed_count * 100
-                                    message = f"Progress: {processed_count}/{total_segments} segments ({success_rate:.1f}% success)"
-                                    logger.info(message)
-                                    if progress_queue:
-                                        progress_queue.put(message)
+                                    thread_safe_log('info', f"Progress: {processed_count}/{total_segments} segments ({success_rate:.1f}% success)", progress_queue)
                             except Exception as e:
                                 logger.error(f"Error processing segment result: {str(e)}")
                 
@@ -489,19 +504,28 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
         return False
 
 def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue=None, max_workers=3):
-    # Increase max_workers from 1 to 3 to download multiple posts concurrently
+    # Ändere max_workers auf 1 und stelle sicher, dass wir strikt sequentiell arbeiten
+    max_workers = 1  # Override to force sequential downloads
+    
     headers = read_headers_from_file("header.txt")
     total_posts = len(post_ids)
-    message = f"Starting download of {total_posts} posts with {max_workers} concurrent downloads..."
+    message = f"Starting download of {total_posts} posts strictly one at a time..."
+    logger.info(message)
     if progress_queue:
         progress_queue.put(message)
     
     progress_bar = tqdm(total=total_posts, desc="Downloading videos", unit="video")
 
-    def handle_download(input_post_id):
+    # Sequentieller Download statt ThreadPoolExecutor
+    for post_id in post_ids:
         try:
+            message = f"Processing post ID: {post_id}"
+            logger.info(message)
+            if progress_queue:
+                progress_queue.put(message)
+                
             process_post_id(
-                input_post_id,
+                post_id,
                 session,
                 headers,
                 selected_resolution,
@@ -510,19 +534,17 @@ def download_videos_concurrently(session, post_ids, selected_resolution, output_
                 progress_bar,
                 progress_queue
             )
+            
+            # Warte immer, bis ein Video fertig ist, bevor das nächste beginnt
+            time.sleep(1)  # Kleine Pause zwischen Videos
+            
         except Exception as e:
-            error = f"Error processing post {input_post_id}: {e}"
+            error = f"Error processing post {post_id}: {e}"
+            logger.error(error)
             if progress_queue:
                 progress_queue.put(error)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(handle_download, post_id) for post_id in post_ids]
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                if progress_queue:
-                    progress_queue.put(f"An error occurred during download: {e}")
+        
+        progress_bar.update(1)
 
     progress_bar.close()
     if progress_queue:
@@ -1152,20 +1174,51 @@ def generate_filename(post: Dict, filename_config: Dict, output_dir: str) -> str
     username = post.get('user', {}).get('username', 'unknown')
     post_id = post.get('id', 'unknown')
     
-    # Better date handling from posted_at
-    try:
-        posted_at = post.get('posted_at', '')
-        if posted_at and isinstance(posted_at, str) and 'T' in posted_at:
-            post_date = posted_at.split('T')[0]  # Extract YYYY-MM-DD
-        else:
-            created_at = post.get('created_at', '')
-            if created_at and isinstance(created_at, str) and 'T' in created_at:
-                post_date = created_at.split('T')[0]
-            else:
-                post_date = f"unknown_date_{post_id[:8]}"
-    except Exception as e:
-        logger.error(f"Error parsing date for post {post_id}: {e}")
-        post_date = f"unknown_date_{post_id[:8]}"
+    # Debug-Ausgabe der verfügbaren Datums-Felder
+    date_fields = [field for field in post.keys() if 'date' in field.lower() or 'time' in field.lower() or 'at' in field.lower()]
+    logger.debug(f"Available date fields for post {post_id}: {date_fields}")
+    
+    # Explizite Prüfung jedes möglichen Datumsfeldes
+    post_date = None
+    
+    # Prüfe posted_at
+    if post.get('posted_at') and isinstance(post.get('posted_at'), str):
+        try:
+            date_part = post.get('posted_at').split('T')[0]
+            if len(date_part) == 10 and date_part.count('-') == 2:  # YYYY-MM-DD format
+                post_date = date_part
+                logger.info(f"Using posted_at date: {post_date} for post {post_id}")
+        except (IndexError, AttributeError):
+            pass
+    
+    # Prüfe created_at falls posted_at nicht funktioniert hat
+    if not post_date and post.get('created_at') and isinstance(post.get('created_at'), str):
+        try:
+            date_part = post.get('created_at').split('T')[0]
+            if len(date_part) == 10 and date_part.count('-') == 2:
+                post_date = date_part
+                logger.info(f"Using created_at date: {post_date} for post {post_id}")
+        except (IndexError, AttributeError):
+            pass
+    
+    # Prüfe timestamp falls auch created_at nicht funktioniert hat
+    if not post_date and post.get('timestamp'):
+        try:
+            from datetime import datetime
+            timestamp = post.get('timestamp')
+            if isinstance(timestamp, (int, float)):
+                date_obj = datetime.fromtimestamp(timestamp)
+                post_date = date_obj.strftime('%Y-%m-%d')
+                logger.info(f"Using timestamp date: {post_date} for post {post_id}")
+        except Exception as e:
+            logger.error(f"Failed to parse timestamp for post {post_id}: {e}")
+    
+    # Fallback auf "unknown_date" wenn gar nichts funktioniert
+    if not post_date:
+        post_date = "unknown_date"
+        logger.warning(f"No date found for post {post_id}, dumping post data for debug")
+        # Log first 500 chars of post data for debugging
+        logger.debug(f"Post data excerpt: {str(post)[:500]}...")
     
     # Get title or use part of post ID
     title = post.get('title', '')
@@ -1185,8 +1238,17 @@ def generate_filename(post: Dict, filename_config: Dict, output_dir: str) -> str
                      .replace('{title}', title) \
                      .replace('{id}', post_id)
     
+    # Entferne doppelte post_id im Dateinamen (wenn vorhanden)
+    base_name = os.path.splitext(filename)[0]
+    if base_name.endswith(f"_{post_id}") and f"_{post_id}" in base_name[:-len(post_id)-1]:
+        filename = base_name[:-len(post_id)-1] + ".mp4"
+    
     # Ensure extension
-    return f"{filename}.mp4"
+    if not filename.endswith('.mp4'):
+        filename += '.mp4'
+        
+    logger.info(f"Generated filename for post {post_id}: {filename}")
+    return filename
 
 def clean_filename(filename: str) -> str:
     """Clean a string to make it safe for filenames"""
