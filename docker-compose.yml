@@ -9,8 +9,15 @@ services:
       - FILENAME_SEPARATOR=_
       - THREAD_COUNT=10
       - AUTH_TOKEN=your_token_here
+      - LOG_FILE=/config/myfans_downloader.log
+      - SEGMENT_DOWNLOAD_THREADS=15
     volumes:
       - ./config:/config
       - ./downloads:/downloads
     ports:
       - "5000:5000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
