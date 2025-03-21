@@ -11,17 +11,35 @@ import concurrent.futures
 import threading
 import m3u8
 import logging
+from logging.handlers import RotatingFileHandler
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import urljoin
 import requests
 from requests import Session
 import re
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Get log file path from environment or use default
+log_file = os.getenv('LOG_FILE', 'myfans_downloader.log')
+
+# Create logger
+logger = logging.getLogger('myfans_downloader')
+logger.setLevel(logging.INFO)
+
+# Create handlers
+console_handler = logging.StreamHandler()
+file_handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)  # 10MB file size
+
+# Create formatters
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+file_handler.setFormatter(formatter)
+
+# Add handlers to logger
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
+
+# Prevent log propagation to avoid duplicate logs
+logger.propagate = False
 
 def read_headers_from_file(filename):
     headers = {}
@@ -77,6 +95,10 @@ def make_request(session: requests.Session, url: str, headers: dict, timeout: in
 
 def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024, max_retries=3, retry_delay=5, progress_queue=None, download_state=None):
     try:
+        # Get segment download threads from environment or use default
+        segment_threads = int(os.getenv('SEGMENT_DOWNLOAD_THREADS', '15'))
+        logger.info(f"Using {segment_threads} threads for segment downloads")
+        
         # Add M3U8 URL validation
         if not m3u8_url_download:
             logger.error(f"Invalid M3U8 URL for post {input_post_id}")
@@ -111,6 +133,13 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
         headers = read_headers_from_file("header.txt")
         session = requests.Session()
         session.headers.update(headers)
+        
+        # Use connection pooling for better performance
+        adapter = requests.adapters.HTTPAdapter(pool_connections=segment_threads, 
+                                               pool_maxsize=segment_threads,
+                                               max_retries=max_retries)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
 
         for attempt in range(max_retries):
             try:
@@ -155,46 +184,104 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                     logger.error(f"No segments found in variant playlist")
                     continue
 
-                logger.info(f"Found {len(playlist.segments)} segments for post {input_post_id}")
+                total_segments = len(playlist.segments)
+                logger.info(f"Found {total_segments} segments for post {input_post_id}")
+                
+                if progress_queue:
+                    progress_queue.put(f"Downloading {total_segments} segments with {segment_threads} parallel threads")
 
-                # Download segments
-                segment_files = []
-                with tqdm(total=len(playlist.segments), desc=f"Segments for {input_post_id}") as pbar:
-                    for i, segment in enumerate(playlist.segments):
-                        if not segment.uri:
-                            logger.error(f"Invalid segment {i}: missing URI")
-                            continue
+                # Download segments concurrently
+                segment_files = [None] * total_segments  # Pre-allocate list with correct order
+                processed_count = 0
+                
+                def download_segment(i, segment):
+                    nonlocal processed_count
+                    
+                    if not segment.uri:
+                        logger.error(f"Invalid segment {i}: missing URI")
+                        return i, None
+                        
+                    seg_path = os.path.join(temp_folder, f"segment_{i:05d}.ts")
+                    
+                    # Skip if segment already exists
+                    if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
+                        return i, seg_path
+                        
+                    # Try to download segment with retries
+                    for seg_retry in range(3):
+                        try:
+                            seg_url = safe_urljoin(playlist.base_uri, segment.uri) if not segment_uri_is_absolute(segment.uri) else segment.uri
+                            response = session.get(seg_url, timeout=30)
+                            response.raise_for_status()
 
-                        seg_path = os.path.join(temp_folder, f"segment_{i:05d}.ts")
+                            with open(seg_path, 'wb') as f:
+                                f.write(response.content)
 
-                        # Try to download segment with retries
-                        for seg_retry in range(3):
+                            if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
+                                return i, seg_path
+                        except Exception as e:
+                            logger.error(f"Error downloading segment {i}: {str(e)}")
+                            if seg_retry == 2:  # Last attempt
+                                return i, None
+                            time.sleep(retry_delay)
+                    
+                    return i, None
+
+                # Use ThreadPoolExecutor for concurrent downloads
+                with tqdm(total=total_segments, desc=f"Segments for {input_post_id}") as pbar:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=segment_threads) as executor:
+                        futures = {executor.submit(download_segment, i, segment): i 
+                                  for i, segment in enumerate(playlist.segments)}
+                        
+                        # Process completed downloads as they finish
+                        for future in concurrent.futures.as_completed(futures):
                             try:
-                                seg_url = safe_urljoin(playlist.base_uri, segment.uri) if not segment_uri_is_absolute(segment.uri) else segment.uri
-                                response = make_request(session, seg_url, headers)
-
-                                with open(seg_path, 'wb') as f:
-                                    f.write(response.content)
-
-                                if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
-                                    segment_files.append(seg_path)
-                                    pbar.update(1)
-                                    break
+                                idx, file_path = future.result()
+                                if file_path:
+                                    segment_files[idx] = file_path
+                                pbar.update(1)
+                                processed_count += 1
+                                
+                                # Log progress occasionally
+                                if processed_count % 50 == 0 or processed_count == total_segments:
+                                    success_rate = len([f for f in segment_files if f]) / processed_count * 100
+                                    message = f"Progress: {processed_count}/{total_segments} segments ({success_rate:.1f}% success)"
+                                    logger.info(message)
+                                    if progress_queue:
+                                        progress_queue.put(message)
                             except Exception as e:
-                                logger.error(f"Error downloading segment {i}: {str(e)}")
-                                if seg_retry == 2:  # Last attempt
-                                    raise
-                                time.sleep(retry_delay)
+                                logger.error(f"Error processing segment result: {str(e)}")
+                
+                # Filter out None values (failed downloads)
+                valid_segments = [f for f in segment_files if f]
+                success_rate = len(valid_segments) / total_segments * 100
+                
+                logger.info(f"Downloaded {len(valid_segments)}/{total_segments} segments ({success_rate:.1f}% success)")
+                if progress_queue:
+                    progress_queue.put(f"Downloaded {len(valid_segments)}/{total_segments} segments ({success_rate:.1f}% success)")
+
+                if len(valid_segments) < total_segments * 0.9:  # Less than 90% segments downloaded
+                    logger.error(f"Too many failed segments: only {success_rate:.1f}% downloaded successfully")
+                    if attempt < max_retries - 1:  # Not the last attempt
+                        logger.info(f"Retrying download, attempt {attempt + 2}/{max_retries}")
+                        continue
 
                 # Merge segments
                 logger.info("Merging segments...")
+                if progress_queue:
+                    progress_queue.put("Merging segments...")
+                
                 with open(ts_file, 'wb') as outfile:
-                    for seg_file in segment_files:
-                        with open(seg_file, 'rb') as infile:
-                            outfile.write(infile.read())
+                    for seg_file in valid_segments:
+                        if os.path.exists(seg_file):
+                            with open(seg_file, 'rb') as infile:
+                                outfile.write(infile.read())
 
                 # Convert to MP4
                 logger.info("Converting to MP4...")
+                if progress_queue:
+                    progress_queue.put("Converting to MP4...")
+                
                 result = subprocess.run(
                     ["ffmpeg", "-y", "-i", ts_file, "-c", "copy", output_file],
                     capture_output=True,
@@ -208,23 +295,32 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
                 # Verify final file
                 if verify_video_file(output_file):
                     # Cleanup
-                    if os.path.exists(ts_file):
-                        os.remove(ts_file)
-                    for seg_file in segment_files:
-                        try:
-                            os.remove(seg_file)
-                        except OSError:
-                            pass
                     try:
-                        os.rmdir(temp_folder)
-                    except OSError:
-                        pass
+                        if os.path.exists(ts_file):
+                            os.remove(ts_file)
+                        
+                        # Delete segments
+                        for seg_file in valid_segments:
+                            if os.path.exists(seg_file):
+                                os.remove(seg_file)
+                                
+                        # Remove temp directory
+                        if os.path.exists(temp_folder):
+                            os.rmdir(temp_folder)
+                    except Exception as e:
+                        logger.warning(f"Error during cleanup: {str(e)}")
                     
                     logger.info(f"Successfully downloaded {input_post_id}")
+                    if progress_queue:
+                        progress_queue.put(f"Successfully downloaded {input_post_id}")
+                    
                     return True
 
             except Exception as e:
                 logger.error(f"Download attempt {attempt + 1} failed: {str(e)}")
+                if progress_queue:
+                    progress_queue.put(f"Download attempt {attempt + 1} failed: {str(e)}")
+                
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
 
@@ -232,6 +328,8 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
 
     except Exception as e:
         logger.exception(f"Fatal error in DL_File: {str(e)}")
+        if progress_queue:
+            progress_queue.put(f"Fatal error: {str(e)}")
         return False
 
 def segment_uri_is_absolute(uri: str) -> bool:
@@ -390,10 +488,11 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
             progress_bar.update(1)
         return False
 
-def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue=None, max_workers=1):
+def download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config, progress_queue=None, max_workers=3):
+    # Increase max_workers from 1 to 3 to download multiple posts concurrently
     headers = read_headers_from_file("header.txt")
     total_posts = len(post_ids)
-    message = f"Starting download of {total_posts} posts one at a time..."
+    message = f"Starting download of {total_posts} posts with {max_workers} concurrent downloads..."
     if progress_queue:
         progress_queue.put(message)
     
@@ -416,7 +515,7 @@ def download_videos_concurrently(session, post_ids, selected_resolution, output_
             if progress_queue:
                 progress_queue.put(error)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(handle_download, post_id) for post_id in post_ids]
         for future in concurrent.futures.as_completed(futures):
             try:
@@ -1053,12 +1152,19 @@ def generate_filename(post: Dict, filename_config: Dict, output_dir: str) -> str
     username = post.get('user', {}).get('username', 'unknown')
     post_id = post.get('id', 'unknown')
     
-    # Try to get the date from posted_at
+    # Better date handling from posted_at
     try:
-        post_date = post.get('posted_at', '').split('T')[0]
-        if not post_date or post_date == '':
-            post_date = f"unknown_date_{post_id[:8]}"  # Use part of post ID to make it unique
-    except:
+        posted_at = post.get('posted_at', '')
+        if posted_at and isinstance(posted_at, str) and 'T' in posted_at:
+            post_date = posted_at.split('T')[0]  # Extract YYYY-MM-DD
+        else:
+            created_at = post.get('created_at', '')
+            if created_at and isinstance(created_at, str) and 'T' in created_at:
+                post_date = created_at.split('T')[0]
+            else:
+                post_date = f"unknown_date_{post_id[:8]}"
+    except Exception as e:
+        logger.error(f"Error parsing date for post {post_id}: {e}")
         post_date = f"unknown_date_{post_id[:8]}"
     
     # Get title or use part of post ID
@@ -1074,17 +1180,12 @@ def generate_filename(post: Dict, filename_config: Dict, output_dir: str) -> str
     
     # Generate filename based on pattern
     pattern = filename_config.get('pattern', '{creator}_{date}_{id}')
-    filename = pattern.format(
-        creator=username,
-        date=post_date,
-        title=title,
-        id=post_id
-    )
+    filename = pattern.replace('{creator}', username) \
+                     .replace('{date}', post_date) \
+                     .replace('{title}', title) \
+                     .replace('{id}', post_id)
     
-    # Ensure filename is unique by adding post ID if not already present
-    if post_id not in filename:
-        filename = f"{filename}_{post_id[:8]}"
-        
+    # Ensure extension
     return f"{filename}.mp4"
 
 def clean_filename(filename: str) -> str:
