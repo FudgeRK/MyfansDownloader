@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="card">
+        <div class="card-body">
+            <h2 class="card-title mb-4">Settings</h2>
+            <form id="settingsForm">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="filename_pattern" class="form-label">Filename Pattern</label>
+                            <input type="text" class="form-control" id="filename_pattern" 
+                                   placeholder="e.g. {creator}_{date}_{title}">
+                            <small class="text-muted">Available variables: {creator}, {date}, {title}, {id}</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="filename_separator" class="form-label">Filename Separator</label>
+                            <input type="text" class="form-control" id="filename_separator" 
+                                   placeholder="_">
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label for="auth_token" class="form-label">Auth Token</label>
+                            <input type="password" class="form-control" id="auth_token">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="thread_count" class="form-label">Download Threads</label>
+                            <input type="number" class="form-control" id="thread_count" 
+                                   min="1" max="20">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group mt-3">
+                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Load current settings
+    fetch('/settings')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('filename_pattern').value = data.filename_pattern;
+            document.getElementById('filename_separator').value = data.filename_separator;
+            document.getElementById('auth_token').value = data.auth_token;
+            document.getElementById('thread_count').value = data.thread_count;
+        });
+    
+    // Handle form submission
+    document.getElementById('settingsForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const settings = {
+            filename_pattern: document.getElementById('filename_pattern').value,
+            filename_separator: document.getElementById('filename_separator').value,
+            auth_token: document.getElementById('auth_token').value,
+            thread_count: parseInt(document.getElementById('thread_count').value)
+        };
+        
+        fetch('/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(settings)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert('Settings saved successfully!');
+            } else {
+                alert('Error saving settings: ' + data.error);
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -7,11 +7,11 @@ Auto switch video quality (1080P is base) if not found</br></br>
 |Type| Support         | Yes or No |
 |-| --------------- |:-----:|
 |Videos| 1080P           | ✅    |
-|Videos| no 720P on Official| ❓ |
+|Videos| 720P            | ✅    |
 |Videos| 480P            | ✅    |
 |Videos| 360P            | ✅    |
-|Videos| back number video            | ✅    |
-|Images| All          | ✅    |
+|Videos| back number     | ✅    |
+|Images| All             | ✅    |
 <h2>Note</h2>
 ♦️ set the token in the header.txt file. (if you want download free content no require)</br>
 from cookies on the website myfans.jp.</br></br>
@@ -29,6 +29,9 @@ alt="Tutorial video" width="600" height="300" /></a>
 
 
 <h2>How to use</h2>
+
+### Python Usage
+
 Use your system's terminal</br>
 Go to the main folder of myfans downloader</br>
 first run
@@ -40,8 +43,46 @@ python main.py
 1. To download all video files or single file (require name of creator).</br>
 2. To download all pictures (require name of creator)
    
+### Docker Usage
+
+#### Using Docker Compose (Recommended)
+
+1. Create the required directories:
+```bash
+mkdir -p config downloads
+```
+
+2. Start the container:
+```bash
+docker compose up
+```
+
+### Using Docker Run
+
+```bash
+docker run -it \
+  -e FILENAME_PATTERN="{creator}_{date}_{id}" \
+  -e FILENAME_SEPARATOR="_" \
+  -e THREAD_COUNT="10" \
+  -v $(pwd)/config:/config \
+  -v $(pwd)/downloads:/downloads \
+  frequency2098/myfans-downloader:latest
+```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| FILENAME_PATTERN | {creator}_{date} | Pattern for naming downloaded files |
+| FILENAME_SEPARATOR | _ | Separator between filename parts |
+| THREAD_COUNT | 10 | Number of concurrent download threads |
+
+## Configuration
+
+Place your `header.txt` file in the `config` directory before running the container.
+
 <h2>🤝 Contributing to Myfans Downloader</h2>
 Any kind of positive contribution is welcome! Please help the project improve by <a href="https://github.com/FudgeRK/MyfansDownloader/pulls" target="_self">opening a pull request</a> with your suggested changes!
 
 <h2>Special Thanks</h2>
-<a href="https://github.com/Shenggang" target="_self">Shenggang</a>, <a href="https://github.com/bluems" target="_self">bluems</a>, <a href="https://github.com/Serph91P" target="_self">Serph91P</a>, <a href="https://github.com/albertphil" target="_self">albertphil</a>
+<a href="https://github.com/Shenggang" target="_self">Shenggang</a>, <a href="https://github.com/bluems" target="_self">bluems</a>, <a href="https://github.com/Serph91P" target="_self">Serph91P</a>, <a href="https://github.com/albertphil" target="_self">albertphil</a>, <a href="https://github.com/mydcxiao" target="_self">0xSho</a>

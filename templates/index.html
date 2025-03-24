@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <h2 class="card-title mb-4">Download Content</h2>
+        <form id="downloadForm">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="form-group">
+                        <label for="type" class="form-label">Content Type</label>
+                        <select id="type" class="form-select" onchange="updateFormOptions()">
+                            <option value="videos">Videos</option>
+                            <option value="images">Images</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="downloadType" class="form-label">Download Mode</label>
+                        <select id="downloadType" class="form-select" onchange="toggleInputs()">
+                            <option value="bulk">Download All Content</option>
+                            <option value="single">Download Single Item</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="col-md-6" id="bulkDownload">
+                    <div class="form-group">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" placeholder="Enter username (without @)" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="download_type" class="form-label">Content Filter</label>
+                        <select id="download_type" class="form-select">
+                            <option value="all">All Posts</option>
+                            <option value="free">Free Posts Only</option>
+                            <option value="subscribed">Subscribed Posts Only</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="resolution" class="form-label">Video Quality</label>
+                        <select id="resolution" name="resolution" class="form-select">
+                            <option value="best">Best Available</option>
+                            <option value="fhd">1080p (Full HD)</option>
+                            <option value="hd">720p (HD)</option>
+                            <option value="sd">480p (SD)</option>
+                            <option value="ld">360p (Low)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="col-md-6 hidden" id="singleDownload">
+                    <div class="form-group">
+                        <label for="postId" class="form-label">Post ID</label>
+                        <input type="text" class="form-control" id="postId" placeholder="Enter post ID">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group mt-3">
+                <button type="submit" class="btn btn-primary">Start Download</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="progress" class="progress-log mt-4"></div>
+
+<script>
+    function updateFormOptions() {
+        const contentType = document.getElementById('type').value;
+        const downloadTypeSelect = document.getElementById('downloadType');
+        const bulkOptionText = contentType === 'videos' ? 'Download All Videos' : 'Download All Images';
+        const singleOptionText = contentType === 'videos' ? 'Download Single Video' : 'Download Single Image';
+        
+        downloadTypeSelect.options[0].text = bulkOptionText;
+        downloadTypeSelect.options[1].text = singleOptionText;
+    }
+
+    function toggleInputs() {
+        const downloadType = document.getElementById('downloadType').value;
+        document.getElementById('bulkDownload').classList.toggle('hidden', downloadType === 'single');
+        document.getElementById('singleDownload').classList.toggle('hidden', downloadType === 'bulk');
+    }
+
+    document.getElementById('downloadForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const progress = document.getElementById('progress');
+        progress.innerHTML = '';
+        
+        const downloadType = document.getElementById('downloadType').value;
+        const data = downloadType === 'bulk' ? {
+            username: document.getElementById('username').value,
+            type: document.getElementById('type').value,
+            download_type: document.getElementById('download_type').value,
+            resolution: document.getElementById('resolution').value
+        } : {
+            post_id: document.getElementById('postId').value,
+            type: document.getElementById('type').value,
+            download_type: 'single',
+            resolution: document.getElementById('resolution').value
+        };
+        
+        const response = await fetch('/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const events = new EventSource('/progress');
+        events.onmessage = (event) => {
+            const timestamp = new Date().toLocaleTimeString();
+            progress.innerHTML += `[${timestamp}] ${event.data}<br>`;
+            progress.scrollTop = progress.scrollHeight;
+        };
+    };
+
+    // Initialize form options on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        updateFormOptions();
+        loadStatus();
+    });
+
+    async function loadStatus() {
+        const response = await fetch('/status');
+        const status = await response.json();
+        const progress = document.getElementById('progress');
+        
+        // Display existing downloads
+        Object.entries(status.downloads).forEach(([post_id, info]) => {
+            const timestamp = new Date(info.last_updated).toLocaleTimeString();
+            const progressText = info.segments_total ? 
+                `(${info.segments_downloaded}/${info.segments_total} segments)` : '';
+            progress.innerHTML += `[${timestamp}] Post ${post_id}: ${info.status} ${progressText}<br>`;
+        });
+    }
+</script>
+{% endblock %}
