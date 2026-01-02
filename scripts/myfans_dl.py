@@ -1,7 +1,10 @@
+import datetime
 import os
+import pathlib
 import sys
 import time
 import json
+import uuid
 from queue import Queue, Empty
 import subprocess
 import configparser
@@ -141,9 +144,10 @@ def DL_File(m3u8_url_download, output_file, input_post_id, chunk_size=1024*1024,
 
         # Setup directories
         output_folder = os.path.dirname(output_file)
-        ts_file = output_file.replace('.mp4', '.ts')
-        temp_folder = output_file.replace('.mp4', '.ts_parts')
-        
+        random_name = str(uuid.uuid4())
+        ts_file =  os.path.join(output_folder, random_name + '.ts')
+        temp_folder = os.path.join(output_folder, random_name + '.ts_parts')
+
         os.makedirs(output_folder, exist_ok=True)
         os.makedirs(temp_folder, exist_ok=True)
 
@@ -379,7 +383,7 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
 
         # Select resolution with fallback logging
         if selected_resolution == 'best':
-            for res in ['fhd', 'hd', 'sd', 'ld']:
+            for res in ['uhd', 'fhd', 'hd', 'sd', 'ld']:
                 if res in resolution_info:
                     selected_resolution = res
                     logger.info(f"Selected best available resolution for post {input_post_id}: {res}")
@@ -393,7 +397,7 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
             if progress_queue:
                 progress_queue.put(message)
             # Try fallback
-            for res in ['fhd', 'hd', 'sd', 'ld']:
+            for res in ['uhd', 'fhd', 'hd', 'sd', 'ld']:
                 if res in resolution_info:
                     selected_resolution = res
                     message = f"Falling back to {res} resolution"
@@ -443,13 +447,31 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
             return False
 
         # Setup output path
-        filename = generate_filename(data, filename_config, output_dir)
-        output_folder = os.path.join(output_dir, data['user']['username'], "videos")
-        full_path = os.path.join(output_folder, filename)
-        
+        output_folder = str(os.path.join(output_dir, data['user']['username'], "videos"))
+        filename = None
+        full_path = None
+        for max_length in list(range(100, 10, -10)): # start at 100, decrease by 10.
+            try:
+                filename = generate_filename(data, filename_config, output_dir, max_length=max_length)
+                full_path = os.path.join(output_folder, filename)
+                path = pathlib.Path(str(full_path))
+                # if it already exists we can exit out
+                if path.exists():
+                    break
+                path.with_suffix('longextension') # to ensure metadata works (e.g. .webp.json)
+                # verify the path works by creating and deleting the file.
+                path.touch()
+                if path.exists():
+                    path.unlink()
+                    break
+            except Exception as e:
+                logger.debug(f"Invalid path with length {max_length} ({str(e)}), reducing...")
+
         # Check existing file
         if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
             if verify_video_file(full_path):
+                generate_metadata(data, filename, output_folder)
+                update_file_date(data, full_path)
                 message = f"File already exists and verified: {filename}"
                 logger.info(message)
                 if progress_queue:
@@ -481,6 +503,8 @@ def process_post_id(input_post_id, session, headers, selected_resolution, output
         )
 
         if success:
+            generate_metadata(data, filename, output_folder)
+            update_file_date(data, full_path)
             message = f"Successfully downloaded video: {filename}"
             logger.info(message)
         else:
@@ -614,36 +638,36 @@ def start_download(username, post_type, download_type, progress_queue, download_
         # Get configuration
         output_dir = os.getenv('DOWNLOADS_DIR', config.get('Settings', 'output_dir'))
         filename_config = read_filename_config(config)
-        
+
+        user_info_url = f"https://api.myfans.jp/api/v2/users/show_by_username?username={username}"
+        message = f"Fetching user info from: {user_info_url}"
+        logger.info(message)
+        progress_queue.put(message)
+
+        response = session.get(user_info_url, headers=read_headers_from_file("header.txt"))
+        response.raise_for_status()
+        user_data = response.json()
+
+        message = f"Successfully retrieved user data for: {username}"
+        logger.info(message)
+        progress_queue.put(message)
+
+        # Fetch posts
+        back_number_plan = user_data.get('current_back_number_plan')
+        user_id = user_data.get('id')
+
+        if not user_id:
+            error = "Failed to retrieve user ID. Please check the username and try again."
+            logger.error(error)
+            progress_queue.put(error)
+            return
+
+        message = f"Found user ID: {user_id}"
+        logger.info(message)
+        progress_queue.put(message)
+
         # Process downloads based on type
         if post_type == 'videos':
-            user_info_url = f"https://api.myfans.jp/api/v2/users/show_by_username?username={username}"
-            message = f"Fetching user info from: {user_info_url}"
-            logger.info(message)
-            progress_queue.put(message)
-            
-            response = session.get(user_info_url, headers=read_headers_from_file("header.txt"))
-            response.raise_for_status()
-            user_data = response.json()
-            
-            message = f"Successfully retrieved user data for: {username}"
-            logger.info(message)
-            progress_queue.put(message)
-            
-            # Fetch posts
-            back_number_plan = user_data.get('current_back_number_plan')
-            user_id = user_data.get('id')
-            
-            if not user_id:
-                error = "Failed to retrieve user ID. Please check the username and try again."
-                logger.error(error)
-                progress_queue.put(error)
-                return
-                
-            message = f"Found user ID: {user_id}"
-            logger.info(message)
-            progress_queue.put(message)
-            
             # Fetch regular posts
             base_url = f"https://api.myfans.jp/api/v2/users/{user_id}/posts?page="
             progress_queue.put("Fetching regular posts...")
@@ -832,8 +856,8 @@ def download_images_concurrently(session, post_ids, output_dir, filename_config,
             response = session.get(url, headers=headers)
             response.raise_for_status()
             data = response.json()
-            
-            images = data.get('images', {}).get('main', [])
+
+            images = data.get('images', [])
             if not images:
                 error = f"No images found for post ID {input_post_id}"
                 logger.error(error)
@@ -853,7 +877,8 @@ def download_images_concurrently(session, post_ids, output_dir, filename_config,
                 if not image_url:
                     continue
 
-                file_name = generate_filename(data, filename_config, output_folder)
+                ext = pathlib.Path(image_url).suffix
+                file_name = generate_filename(data, filename_config, output_folder, ext)
                 if len(images) > 1:
                     base, ext = os.path.splitext(file_name)
                     file_name = f"{base}_{idx + 1}{ext}"
@@ -863,8 +888,10 @@ def download_images_concurrently(session, post_ids, output_dir, filename_config,
                 if os.path.exists(full_path):
                     message = f"Image already exists: {file_name}"
                     logger.info(message)
-                    if progress_queue:
-                        progress_queue.put(message)
+                    update_file_date(data, full_path)
+                    generate_metadata(data, file_name, output_folder, ext)
+                    # if progress_queue:
+                    #     progress_queue.put(message)
                     continue
 
                 img_response = session.get(image_url, headers=headers)
@@ -872,6 +899,9 @@ def download_images_concurrently(session, post_ids, output_dir, filename_config,
 
                 with open(full_path, 'wb') as f:
                     f.write(img_response.content)
+
+                generate_metadata(data, file_name, output_folder, ext.replace('.', ''))
+                update_file_date(data, full_path)
 
                 message = f"Downloaded image: {file_name}"
                 logger.info(message)
@@ -987,6 +1017,7 @@ def get_available_resolutions(main_videos):
         if res:
             # Map API resolutions to display names
             res_map = {
+                'uhd': '4K',
                 'fhd': '1080p (Full HD)',
                 'hd': '720p (HD)',
                 'sd': '480p (SD)',
@@ -1041,8 +1072,8 @@ def handle_image_download(post_id, session, headers, output_dir, filename_config
         response = session.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
-        
-        images = data.get('images', {}).get('main', [])
+
+        images = data.get('images', [])
         if not images:
             error = f"No images found for post ID {post_id}"
             logger.error(error)
@@ -1059,7 +1090,8 @@ def handle_image_download(post_id, session, headers, output_dir, filename_config
             if not image_url:
                 continue
 
-            file_name = generate_filename(data, filename_config, output_folder)
+            ext = pathlib.Path(image_url).suffix
+            file_name = generate_filename(data, filename_config, output_folder, ext)
             if len(images) > 1:
                 base, ext = os.path.splitext(file_name)
                 file_name = f"{base}_{idx + 1}{ext}"
@@ -1069,8 +1101,10 @@ def handle_image_download(post_id, session, headers, output_dir, filename_config
             if os.path.exists(full_path):
                 message = f"Image already exists: {file_name}"
                 logger.info(message)
-                if progress_queue:
-                    progress_queue.put(message)
+                generate_metadata(data, file_name, output_folder, ext)
+                update_file_date(data, full_path)
+                # if progress_queue:
+                #     progress_queue.put(message)
                 continue
 
             img_response = session.get(image_url, headers=headers)
@@ -1078,6 +1112,9 @@ def handle_image_download(post_id, session, headers, output_dir, filename_config
 
             with open(full_path, 'wb') as f:
                 f.write(img_response.content)
+
+            generate_metadata(data, file_name, output_folder, ext.replace('.', ''))
+            update_file_date(data, full_path)
 
             message = f"Downloaded image: {file_name}"
             logger.info(message)
@@ -1129,7 +1166,7 @@ def check_existing_files(filtered_posts: List[Dict], output_dir: str, filename_c
         post_id = post.get('id')
         if not post_id:
             continue
-            
+
         # Get post date
         post_date = post.get('posted_at', '').split('T')[0] if post.get('posted_at') else 'unknown_date'
         
@@ -1139,7 +1176,7 @@ def check_existing_files(filtered_posts: List[Dict], output_dir: str, filename_c
         # Generate possible filenames (both old and new patterns)
         possible_filenames = [
             # New pattern with post ID
-            generate_filename(post, filename_config, output_dir),
+            generate_filename(post, filename_config, output_dir, '.mp4'),
             # Old pattern with {title}
             f"{username}_{post_date}_{{title}}.mp4",
             f"{username}_{post_date}_{{title}}_1.mp4"  # For split videos
@@ -1154,6 +1191,9 @@ def check_existing_files(filtered_posts: List[Dict], output_dir: str, filename_c
             if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
                 if verify_video_file(full_path):
                     existing_files.append(post_id)
+                    # also update metadata and file dates (temp)
+                    generate_metadata(post, filename, output_folder)
+                    update_file_date(post, full_path)
                     logger.info(f"Found existing verified file: {filename}")
                     found_valid_file = True
                     break
@@ -1169,7 +1209,7 @@ def check_existing_files(filtered_posts: List[Dict], output_dir: str, filename_c
             
     return existing_files, missing_files
 
-def generate_filename(post: Dict, filename_config: Dict, output_dir: str) -> str:
+def generate_filename(post: Dict, filename_config: Dict, output_dir: str, ext:str = '.mp4', max_length:int=100) -> str:
     """Generate a unique filename for the video"""
     username = post.get('user', {}).get('username', 'unknown')
     post_id = post.get('id', 'unknown')
@@ -1180,53 +1220,26 @@ def generate_filename(post: Dict, filename_config: Dict, output_dir: str) -> str
     
     # Explizite Prüfung jedes möglichen Datumsfeldes
     post_date = None
-    
-    # Prüfe posted_at
-    if post.get('posted_at') and isinstance(post.get('posted_at'), str):
-        try:
-            date_part = post.get('posted_at').split('T')[0]
-            if len(date_part) == 10 and date_part.count('-') == 2:  # YYYY-MM-DD format
-                post_date = date_part
-                logger.info(f"Using posted_at date: {post_date} for post {post_id}")
-        except (IndexError, AttributeError):
-            pass
-    
-    # Prüfe created_at falls posted_at nicht funktioniert hat
-    if not post_date and post.get('created_at') and isinstance(post.get('created_at'), str):
-        try:
-            date_part = post.get('created_at').split('T')[0]
-            if len(date_part) == 10 and date_part.count('-') == 2:
-                post_date = date_part
-                logger.info(f"Using created_at date: {post_date} for post {post_id}")
-        except (IndexError, AttributeError):
-            pass
-    
-    # Prüfe timestamp falls auch created_at nicht funktioniert hat
-    if not post_date and post.get('timestamp'):
-        try:
-            from datetime import datetime
-            timestamp = post.get('timestamp')
-            if isinstance(timestamp, (int, float)):
-                date_obj = datetime.fromtimestamp(timestamp)
-                post_date = date_obj.strftime('%Y-%m-%d')
-                logger.info(f"Using timestamp date: {post_date} for post {post_id}")
-        except Exception as e:
-            logger.error(f"Failed to parse timestamp for post {post_id}: {e}")
-    
+    if date_obj := get_post_date(post):
+        post_date = date_obj.strftime('%Y-%m-%d')
+        logger.info(f"Using date: {post_date} for post {post_id}")
+
     # Fallback auf "unknown_date" wenn gar nichts funktioniert
     if not post_date:
         post_date = "unknown_date"
         logger.warning(f"No date found for post {post_id}, dumping post data for debug")
         # Log first 500 chars of post data for debugging
         logger.debug(f"Post data excerpt: {str(post)[:500]}...")
-    
+
     # Get title or use part of post ID
     title = post.get('title', '')
+    if not title or title.strip() == '':
+        title = post.get('body', '')
     if not title or title.strip() == '':
         title = post_id[:8]  # Use first 8 chars of post ID as title
         
     # Clean the title
-    title = clean_filename(title)
+    title = clean_filename(title, max_length)
     
     # Get separator
     separator = filename_config.get('separator', '_')
@@ -1241,16 +1254,80 @@ def generate_filename(post: Dict, filename_config: Dict, output_dir: str) -> str
     # Entferne doppelte post_id im Dateinamen (wenn vorhanden)
     base_name = os.path.splitext(filename)[0]
     if base_name.endswith(f"_{post_id}") and f"_{post_id}" in base_name[:-len(post_id)-1]:
-        filename = base_name[:-len(post_id)-1] + ".mp4"
+        filename = base_name[:-len(post_id)-1] + ext
     
     # Ensure extension
-    if not filename.endswith('.mp4'):
-        filename += '.mp4'
-        
+    if not filename.endswith(ext):
+        filename += ext
+
     logger.info(f"Generated filename for post {post_id}: {filename}")
     return filename
 
-def clean_filename(filename: str) -> str:
+
+def generate_metadata(post: Dict, filename: str, output_dir: str, ext: str = 'mp4'):
+    enabled = int(os.getenv('WRITE_METADATA', '0'))
+    if not enabled:
+        return
+    # User
+    userdata = post.get('user', {})
+    username = userdata.get('username', '')
+    user_id  = userdata.get('id', '')
+    # Post data
+    post_id = post.get('id', '')
+    post_body = post.get('body', '')
+    # Date
+    date_obj = get_post_date(post)
+    post_date = None
+    if date_obj:
+        post_date = date_obj.strftime('%Y-%m-%d %H:%M:%S')
+
+    metadata_path = os.path.join(output_dir, f"{filename}.json")
+    with open(metadata_path, "w") as f:
+        f.write(f'''{{
+  "service": "myfans",
+  "category": "myfans",
+  "subcategory": "myfans",
+  "id": "{post_id}",
+  "is_preview": false,
+  "user": "{user_id}",
+  "username": "{username}",
+  "content": "{post_body}",
+  "post_id": "{post_id}",
+  "type": "attachment",
+  "extension": "{ext}",
+  "date": "{post_date}",
+  "post_date": "{post_date}",
+  "media_date": "{post_date}"
+}}
+''')
+    update_file_date(post, metadata_path)
+
+
+def get_post_date(post: Dict) -> datetime.datetime | None:
+    post_date_str = None
+    try:
+        if post.get('posted_at') and isinstance(post.get('posted_at'), str):
+            post_date_str = post.get('posted_at')
+        elif post.get('created_at') and isinstance(post.get('created_at'), str):
+            post_date_str = post.get('created_at')
+        elif post.get('published_at') and isinstance(post.get('published_at'), str):
+            post_date_str = post.get('published_at')
+        elif post.get('timestamp') and isinstance(post.get('timestamp'), (int, float)):
+            timestamp = post.get('timestamp')
+            return datetime.datetime.fromtimestamp(timestamp)
+        if post_date_str:
+            return datetime.datetime.fromisoformat(post_date_str)
+    except Exception as e:
+        logger.error(f"Failed to parse date for post {post.get('id', 'unknown')} ({str(e)})")
+    return None
+
+def update_file_date(post: Dict, full_path: str):
+    date_obj = get_post_date(post)
+    if date_obj:
+        timestamp = date_obj.timestamp()
+        os.utime(full_path, (timestamp, timestamp))
+
+def clean_filename(filename: str, max_length:int = 100) -> str:
     """Clean a string to make it safe for filenames"""
     # Replace problematic characters
     invalid_chars = '<>:"/\\|?*'
@@ -1262,7 +1339,6 @@ def clean_filename(filename: str) -> str:
     filename = filename.strip('. ')  # Remove leading/trailing dots and spaces
     
     # Limit length
-    max_length = 100
     if len(filename) > max_length:
         name, ext = os.path.splitext(filename)
         filename = name[:max_length-len(ext)] + ext
@@ -1463,7 +1539,7 @@ def main():
                 print("No posts match the selected criteria.")
                 return
 
-            selected_resolution = 'fhd'
+            selected_resolution = 'best'
             download_videos_concurrently(session, post_ids, selected_resolution, output_dir, filename_config)
 
         except requests.RequestException as e:
@@ -1471,7 +1547,7 @@ def main():
 
     elif choice == '2':
         post_id = input("Enter the post ID to download: ")
-        selected_resolution = 'fhd'
+        selected_resolution = 'best'
         download_single_file(session, post_id, selected_resolution, output_dir, filename_config)
 
     else:

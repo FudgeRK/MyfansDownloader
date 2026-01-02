@@ -1,6 +1,7 @@
 services:
   myfans-downloader:
-    image: frequency2098/myfans-downloader:main
+#    image: frequency2098/myfans-downloader:main
+    build: .
     container_name: myfans-downloader
     environment:
       - CONFIG_DIR=/config
@@ -11,9 +12,13 @@ services:
       - AUTH_TOKEN=your_token_here
       - LOG_FILE=/config/myfans_downloader.log
       - SEGMENT_DOWNLOAD_THREADS=15
+      - WRITE_METADATA=0
     volumes:
       - ./config:/config
       - ./downloads:/downloads
+    user: 1000:1000
+    cap_drop:
+      - ALL
     ports:
       - "5000:5000"
     logging:
