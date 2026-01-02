@@ -34,7 +34,7 @@ class DownloadState:
         if os.path.exists(downloads_dir):
             for root, _, files in os.walk(downloads_dir):
                 for file in files:
-                    if file.endswith(('.mp4', '.jpg', '.png', '.gif')):
+                    if file.endswith(('.mp4', '.jpg', '.png', '.webp', '.gif')):
                         self.state["completed_files"].add(file)
         self.save_state()
 
