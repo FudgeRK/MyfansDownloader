@@ -8,6 +8,10 @@ import uuid
 from queue import Queue, Empty
 import subprocess
 import configparser
+
+# Add parent directory to path so imports work
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from tqdm import tqdm
 from scripts.filename_utils import *
 import concurrent.futures
