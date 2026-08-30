@@ -29,15 +29,23 @@ def run_cli_mode():
         if choice == "1":
             from scripts.myfans_dl import main as video_main
             print("\nRunning Download videos...\n")
-            video_main()
+            _run_cli_entry(video_main)
         elif choice == "2":
             from scripts.myfans_image_dl import main as image_main
             print("\nRunning Download images...\n")
-            image_main()
+            _run_cli_entry(image_main)
         else:
             print("Invalid choice. Please enter 1 or 2")
     except Exception as e:
         print(f"Error in CLI mode: {e}")
+
+
+def _run_cli_entry(fn):
+    try:
+        fn()
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            print(f"Stopped with exit code {exc.code}")
 
 def run_web_mode():
     """Run the Flask web server"""

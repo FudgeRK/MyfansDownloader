@@ -65,10 +65,12 @@ Downloads go to `downloads/<creator>/videos` or `downloads/<creator>/images` by 
 ```bash
 mkdir -p config downloads
 # put header.txt in ./config
+# Linux: the compose file runs as UID 1000, so grant write access:
+#   sudo chown 1000:1000 config downloads
 docker compose up
 ```
 
-Open http://localhost:5000. Files are written to `./downloads`.
+Keep port 5000 on localhost. Files are written to `./downloads`.
 
 ### Docker run
 

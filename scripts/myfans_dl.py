@@ -113,7 +113,8 @@ def process_image_post(
                 update_file_date(data, full_path)
                 generate_metadata(data, filename, folder, ext.lstrip("."))
                 continue
-            download_image_bytes(client.session, url, media_headers(client.headers), full_path)
+            if not download_image_bytes(client.session, url, media_headers(client.headers), full_path):
+                raise RuntimeError(f"Empty image download for {url}")
             update_file_date(data, full_path)
             generate_metadata(data, filename, folder, ext.lstrip("."))
             emit(progress_queue, f"Downloaded image: {filename}")
@@ -142,6 +143,9 @@ def process_video_post(
     download_state=None,
 ) -> bool:
     try:
+        if download_state and download_state.is_completed(post_id):
+            emit(progress_queue, f"Skipping already downloaded video post {post_id}")
+            return True
         if download_state:
             download_state.add_download(post_id, status="in_progress")
         data = client.get_post(post_id)
@@ -156,7 +160,7 @@ def process_video_post(
             video_payload = data.get("videos")
         variants = videos_from_payload(video_payload) or videos_from_payload(data.get("videos"))
         main_variants = [item for item in variants if item.get("source") != "trial"]
-        chosen = pick_video_variant(main_variants or variants, selected_resolution)
+        chosen = pick_video_variant(main_variants, selected_resolution)
         if not chosen:
             emit(progress_queue, f"No video URL for post {post_id} (locked or unavailable)", "error")
             if download_state:
@@ -533,7 +537,7 @@ def main() -> None:
         print("No posts match the selected criteria.")
         return
     if choice == "3":
-        print("\n".join(post_ids))
+        print("\n".join(str(post_id) for post_id in post_ids))
         print(f"\n{len(post_ids)} post IDs")
         return
     download_videos_concurrently(

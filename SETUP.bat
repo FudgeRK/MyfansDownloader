@@ -15,11 +15,12 @@ echo This will install Python and dependencies.
 echo Please wait...
 echo.
 
-python --version >nul 2>&1
+python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)" >nul 2>&1
 if not errorlevel 1 (
-    echo Python is already installed.
+    echo Python 3.9+ is already installed.
     goto install_deps
 )
+echo Python 3.9+ was not found. Installing Python 3.11...
 
 REM Download Python installer
 echo Downloading Python 3.11...

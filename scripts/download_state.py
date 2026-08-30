@@ -1,6 +1,7 @@
 """Persistent download progress used by the web UI."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 import threading
@@ -16,7 +17,7 @@ class DownloadState:
         directory = Path(state_dir) if state_dir else config_dir()
         ensure_dir(directory)
         self.state_file = str(directory / "download_state.json")
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.state = self._load_state()
         completed = self.state.get("completed_files", [])
         self.state["completed_files"] = set(completed if isinstance(completed, list) else [])
@@ -92,7 +93,8 @@ class DownloadState:
             self.save_state()
 
     def is_completed(self, post_id) -> bool:
-        return str(post_id) in self.state["completed_files"]
+        with self._lock:
+            return str(post_id) in self.state["completed_files"]
 
     def get_progress(self, post_id) -> Dict[str, Any]:
         return self.state["downloads"].get(str(post_id), {})
@@ -101,8 +103,13 @@ class DownloadState:
         return filename in self.state["completed_files"]
 
     def get_serializable_state(self) -> Dict[str, Any]:
-        state_copy = dict(self.state)
-        completed = state_copy.get("completed_files")
-        if isinstance(completed, set):
-            state_copy["completed_files"] = list(completed)
-        return state_copy
+        with self._lock:
+            completed = self.state.get("completed_files") or []
+            if isinstance(completed, set):
+                completed = list(completed)
+            return {
+                "downloads": copy.deepcopy(self.state.get("downloads") or {}),
+                "completed_files": list(completed),
+                "failed_files": copy.deepcopy(self.state.get("failed_files") or {}),
+                "in_progress": copy.deepcopy(self.state.get("in_progress") or {}),
+            }

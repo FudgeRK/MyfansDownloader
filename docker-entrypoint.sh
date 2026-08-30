@@ -1,10 +1,10 @@
 #!/bin/sh
 set -e
 
-mkdir -p /config /downloads
+mkdir -p /config /downloads || true
 if [ -n "$LOG_FILE" ]; then
-  mkdir -p "$(dirname "$LOG_FILE")"
-  touch "$LOG_FILE"
+  mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+  touch "$LOG_FILE" 2>/dev/null || true
 fi
 
 if [ ! -f /config/config.ini ] && [ -f /app/config.ini ]; then

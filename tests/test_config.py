@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.download_state import DownloadState
 from scripts.settings_loader import save_config
 
 
@@ -29,6 +30,17 @@ class ConfigPreserveTests(unittest.TestCase):
             self.assertEqual(loaded.get("Settings", "output_dir"), "downloads")
             self.assertEqual(loaded.get("Filename", "pattern"), "{creator}_{date}_{id}")
             self.assertEqual(loaded.get("Threads", "threads"), "3")
+
+
+class DownloadStateTests(unittest.TestCase):
+    def test_serializable_snapshot_is_independent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = DownloadState(state_dir=tmp)
+            state.mark_completed("abc")
+            snapshot = state.get_serializable_state()
+            self.assertIn("abc", snapshot["completed_files"])
+            snapshot["completed_files"].append("mutated")
+            self.assertNotIn("mutated", state.get_serializable_state()["completed_files"])
 
 
 if __name__ == "__main__":

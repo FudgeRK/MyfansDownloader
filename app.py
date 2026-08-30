@@ -164,12 +164,12 @@ def settings_api():
         if "write_metadata" in data:
             config.set("Settings", "write_metadata", "1" if data.get("write_metadata") else "0")
             os.environ["WRITE_METADATA"] = config.get("Settings", "write_metadata")
-        token = data.get("auth_token")
-        if token is not None:
-            config.set("Settings", "auth_token", str(token))
-            os.environ["AUTH_TOKEN"] = str(token)
+        token = (data.get("auth_token") or "").strip()
+        if token:
+            config.set("Settings", "auth_token", token)
+            os.environ["AUTH_TOKEN"] = token
             try:
-                write_auth_token(str(token))
+                write_auth_token(token)
             except OSError as exc:
                 logger.warning("Could not write header.txt: %s", exc)
         os.environ["FILENAME_PATTERN"] = config.get("Filename", "pattern")
@@ -179,12 +179,14 @@ def settings_api():
         return jsonify({"status": "success"})
 
     settings = current_settings(config)
+    token_set = bool(str(settings.get("auth_token") or "").strip())
     try:
         headers = read_headers_from_file("header.txt")
-        if has_auth_token(headers) and not settings.get("auth_token"):
-            settings["auth_token"] = headers.get("authorization", "")
+        token_set = token_set or has_auth_token(headers)
     except FileNotFoundError:
         pass
+    settings.pop("auth_token", None)
+    settings["auth_token_set"] = token_set
     return jsonify(settings)
 
 

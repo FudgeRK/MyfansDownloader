@@ -26,7 +26,8 @@
                         <div class="form-group">
                             <label for="auth_token" class="form-label">Auth Token</label>
                             <input type="password" class="form-control" id="auth_token"
-                                   placeholder="Token from _mfans_token cookie">
+                                   placeholder="Leave blank to keep the current token"
+                                   autocomplete="off">
                         </div>
 
                         <div class="form-group">
@@ -57,7 +58,10 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             document.getElementById('filename_pattern').value = data.filename_pattern || '';
             document.getElementById('filename_separator').value = data.filename_separator || '_';
-            document.getElementById('auth_token').value = data.auth_token || '';
+            document.getElementById('auth_token').value = '';
+            document.getElementById('auth_token').placeholder = data.auth_token_set
+                ? 'Token is set — leave blank to keep it'
+                : 'Token from _mfans_token cookie';
             document.getElementById('thread_count').value = data.thread_count || 3;
             const metadata = String(data.write_metadata || '0');
             document.getElementById('write_metadata').checked = ['1', 'true', 'yes', 'on'].includes(metadata.toLowerCase());

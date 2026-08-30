@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from MyfansDownloader_unified import _run_cli_entry
 from scripts.utils import post_is_available
 
 
@@ -48,6 +49,14 @@ class StartDownloadDoneTests(unittest.TestCase):
             items.append(queue.get_nowait())
         self.assertEqual(items[-1], "DONE")
         self.assertTrue(any("username is required" in str(item).lower() for item in items))
+
+
+class LauncherTests(unittest.TestCase):
+    def test_cli_entry_swallows_system_exit(self):
+        def boom():
+            raise SystemExit(1)
+
+        _run_cli_entry(boom)
 
 
 class AccessLogicTests(unittest.TestCase):

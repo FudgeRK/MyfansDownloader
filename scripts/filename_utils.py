@@ -62,6 +62,7 @@ def generate_filename(
     ext: str = ".mp4",
     max_length: int = 100,
     index: Optional[int] = None,
+    unique: bool = False,
 ) -> str:
     pattern = filename_config.get("pattern") or DEFAULT_PATTERN
     separator = filename_config.get("separator") or DEFAULT_SEPARATOR
@@ -94,15 +95,16 @@ def generate_filename(
     if not filename.lower().endswith(ext.lower()):
         filename += ext
 
-    base_name, file_ext = os.path.splitext(filename)
     candidate = filename
-    counter = 1
-    folder = output_folder or ""
-    with filename_lock:
-        while candidate in generated_filenames or (folder and os.path.exists(os.path.join(folder, candidate))):
-            candidate = f"{base_name}_{counter}{file_ext}"
-            counter += 1
-        generated_filenames.add(candidate)
+    if unique:
+        base_name, file_ext = os.path.splitext(filename)
+        counter = 1
+        folder = output_folder or ""
+        with filename_lock:
+            while candidate in generated_filenames or (folder and os.path.exists(os.path.join(folder, candidate))):
+                candidate = f"{base_name}_{counter}{file_ext}"
+                counter += 1
+            generated_filenames.add(candidate)
     return candidate
 
 

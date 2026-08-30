@@ -14,12 +14,13 @@ import sys
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from helpers.deps import parse_requirement_name
+from helpers.deps import MIN_PYTHON, parse_requirement_name
 from scripts.api import (
     collect_image_urls,
     media_headers,
     normalize_auth_token,
     parse_header_lines,
+    resolution_info_from_variants,
     videos_from_payload,
 )
 from scripts.filename_utils import generate_filename, generate_metadata, generated_filenames
@@ -33,6 +34,11 @@ from scripts.utils import (
     post_is_available,
     url_dirname,
 )
+
+
+class PythonVersionTests(unittest.TestCase):
+    def test_minimum_is_3_9(self):
+        self.assertEqual(MIN_PYTHON, (3, 9))
 
 
 class RequirementParsingTests(unittest.TestCase):
@@ -67,7 +73,7 @@ class FilenameTests(unittest.TestCase):
             )
             self.assertEqual(name, "creator_2024-01-02_abc-123.mp4")
 
-    def test_unique_when_file_exists(self):
+    def test_deterministic_when_file_exists(self):
         post = {"id": "1", "published_at": "2024-01-02T00:00:00Z", "user": {"username": "u"}}
         with tempfile.TemporaryDirectory() as tmp:
             existing = Path(tmp) / "u_2024-01-02_1.mp4"
@@ -76,6 +82,19 @@ class FilenameTests(unittest.TestCase):
                 post,
                 {"pattern": "{creator}_{date}_{id}", "separator": "_"},
                 tmp,
+            )
+            self.assertEqual(name, "u_2024-01-02_1.mp4")
+
+    def test_unique_true_suffixes_collisions(self):
+        post = {"id": "1", "published_at": "2024-01-02T00:00:00Z", "user": {"username": "u"}}
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "u_2024-01-02_1.mp4"
+            existing.write_bytes(b"x")
+            name = generate_filename(
+                post,
+                {"pattern": "{creator}_{date}_{id}", "separator": "_"},
+                tmp,
+                unique=True,
             )
             self.assertEqual(name, "u_2024-01-02_1_1.mp4")
 
@@ -173,6 +192,19 @@ class VideoPayloadTests(unittest.TestCase):
         videos = videos_from_payload(payload)
         self.assertEqual(len(videos), 2)
         self.assertEqual({item["source"] for item in videos}, {"main", "trial"})
+
+    def test_resolution_info_keeps_main_over_trial(self):
+        payload = {
+            "main": [{"url": "https://cdn/main.m3u8", "resolution": "fhd", "height": 1080}],
+            "trial": [{"url": "https://cdn/trial.m3u8", "resolution": "fhd", "height": 1080}],
+        }
+        info = resolution_info_from_variants(videos_from_payload(payload))
+        self.assertEqual(info["fhd"]["url"], "https://cdn/main.m3u8")
+        self.assertEqual(info["fhd"]["source"], "main")
+
+    def test_resolution_info_ignores_trial_only(self):
+        payload = {"trial": [{"url": "https://cdn/trial.m3u8", "resolution": "ld", "height": 360}]}
+        self.assertEqual(resolution_info_from_variants(videos_from_payload(payload)), {})
 
 
 class PathTests(unittest.TestCase):

@@ -10,11 +10,12 @@ from helpers.prompt import prompt_yes_no
 ROOT = Path(__file__).resolve().parent.parent
 
 REQUIREMENT_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+MIN_PYTHON = (3, 9)
 
 
 def check_python_version():
-    if sys.version_info < (3, 8):
-        print("This script requires Python 3.8 or higher!")
+    if sys.version_info < MIN_PYTHON:
+        print("This script requires Python 3.9 or higher!")
         return False
     return True
 
@@ -180,13 +181,16 @@ def _find_available_powershell():
 
 def _add_to_path_env(bin_folder):
     powershell = _find_available_powershell()
-    command = (
-        f"{powershell} -Command \""
-        f"[Environment]::SetEnvironmentVariable('Path', "
-        f"[Environment]::GetEnvironmentVariable('Path', 'User') + ';{bin_folder}', 'User')\""
+    script = (
+        "[Environment]::SetEnvironmentVariable("
+        "'Path', "
+        "[Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:MF_FFMPEG_BIN, "
+        "'User')"
     )
-    subprocess.run(command, shell=True, check=True)
-    os.environ["PATH"] = bin_folder + os.pathsep + os.environ.get("PATH", "")
+    env = os.environ.copy()
+    env["MF_FFMPEG_BIN"] = str(bin_folder)
+    subprocess.run([powershell, "-NoProfile", "-Command", script], check=True, env=env)
+    os.environ["PATH"] = str(bin_folder) + os.pathsep + os.environ.get("PATH", "")
     print("Updated PATH in user environment variable.")
     print("----------------------------------------------------------------")
     print("FFmpeg was added to your user PATH. Re-open this terminal if ffmpeg is still not found.")

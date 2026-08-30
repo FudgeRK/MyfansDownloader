@@ -125,11 +125,18 @@
         }
 
         startBtn.disabled = true;
-        const response = await fetch('/download', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
+        let response;
+        try {
+            response = await fetch('/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+        } catch (err) {
+            appendLog('Could not reach the download server');
+            startBtn.disabled = false;
+            return;
+        }
         if (!response.ok) {
             const error = await response.json().catch(() => ({ error: response.statusText }));
             appendLog(error.error || 'Failed to start download');

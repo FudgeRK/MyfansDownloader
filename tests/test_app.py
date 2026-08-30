@@ -34,6 +34,8 @@ class FlaskRouteTests(unittest.TestCase):
         payload = resp.get_json()
         self.assertIn("filename_pattern", payload)
         self.assertIn("thread_count", payload)
+        self.assertIn("auth_token_set", payload)
+        self.assertNotIn("auth_token", payload)
 
     def test_download_requires_target(self):
         resp = self.client.post("/download", json={})

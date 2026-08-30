@@ -19,6 +19,8 @@ from scripts.utils import join_url, url_dirname, verify_video_file
 
 logger = logging.getLogger("myfans_downloader")
 ProgressCb = Optional[Callable[[str], None]]
+FFMPEG_DOWNLOAD_TIMEOUT = 4 * 60 * 60
+FFMPEG_REMUX_TIMEOUT = 30 * 60
 
 
 def _notify(progress: ProgressCb, message: str) -> None:
@@ -78,10 +80,23 @@ def ffmpeg_download(url: str, output_file: str, headers: Dict[str, str]) -> bool
     ]
     for cmd in commands:
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=FFMPEG_DOWNLOAD_TIMEOUT,
+            )
         except FileNotFoundError:
             logger.error("ffmpeg is not installed or not on PATH")
             return False
+        except subprocess.TimeoutExpired:
+            logger.error("ffmpeg download timed out after %s seconds", FFMPEG_DOWNLOAD_TIMEOUT)
+            if os.path.exists(output_file):
+                try:
+                    os.remove(output_file)
+                except OSError:
+                    pass
+            continue
         if result.returncode == 0 and verify_video_file(output_file):
             return True
         if result.stderr:
@@ -236,8 +251,8 @@ def python_hls_download(
                     _notify(progress, f"Progress: {done}/{total} segments ({ok} ok)")
 
         valid = [path for path in results if path]
-        if not valid or len(valid) < total * 0.9:
-            raise RuntimeError(f"Too many failed segments ({len(valid)}/{total})")
+        if len(valid) != total:
+            raise RuntimeError(f"Incomplete HLS download: {len(valid)}/{total} segments")
 
         ts_path = os.path.join(temp_root, "joined.ts")
         with open(ts_path, "wb") as outfile:
@@ -248,16 +263,19 @@ def python_hls_download(
                 with open(path, "rb") as handle:
                     outfile.write(handle.read())
 
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", ts_path, "-c", "copy", output_file],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", ts_path, "-c", "copy", output_file],
+                capture_output=True,
+                text=True,
+                timeout=FFMPEG_REMUX_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            logger.error("ffmpeg remux timed out after %s seconds", FFMPEG_REMUX_TIMEOUT)
+            return False
         if result.returncode != 0:
             logger.error("ffmpeg remux failed: %s", (result.stderr or "")[:500])
-            shutil.copyfile(ts_path, output_file if output_file.endswith(".ts") else output_file + ".ts")
-            if result.returncode != 0:
-                return False
+            return False
         return verify_video_file(output_file)
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)

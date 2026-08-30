@@ -329,21 +329,30 @@ def get_video_info(
     variants = videos_from_payload(video_payload)
     if not variants:
         variants = videos_from_payload(data.get("videos") if isinstance(data, dict) else None)
-    if not variants:
+    resolution_info = resolution_info_from_variants(variants)
+    if not resolution_info:
         return data, None, "No videos found"
+    return data, resolution_info, None
 
+
+def resolution_info_from_variants(variants: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     resolution_info: Dict[str, Dict[str, Any]] = {}
-    for video in variants:
+    for video in variants or []:
+        source = video.get("source") or "main"
+        if source == "trial":
+            continue
         key = str(video.get("resolution") or video.get("height") or len(resolution_info))
+        if key in resolution_info and resolution_info[key].get("source") != "trial":
+            continue
         resolution_info[key] = {
             "url": video.get("url"),
             "size": video.get("size", 0),
             "duration": video.get("duration") or video.get("duration_ms", 0),
             "width": video.get("width", 0),
             "height": video.get("height") or height_from_resolution_label(video.get("resolution")),
-            "source": video.get("source", "main"),
+            "source": source,
         }
-    return data, resolution_info, None
+    return resolution_info
 
 
 def choose_video_url(resolution_info: Dict[str, Dict[str, Any]], requested: str = "best") -> Optional[Dict[str, Any]]:

@@ -16,3 +16,11 @@ MyfansDownloader.bat
 MyfansDownloader.vbs
 LICENSE
 README.md
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+header.txt
