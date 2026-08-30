@@ -1,120 +1,114 @@
-<h1 align="center">Myfans.jp Downloader</h1>
-<blockquote><p align="center">Download Videos and Images</p></blockquote>
-<h2>Details</h2>
-Retrieve post IDs and download videos and images you already have access to.
-Quality selection is supported (best available by default, with fallback if a requested resolution is missing).
+# MyFans Downloader
 
-|Type| Support     | Yes or No |
-|-|-------------|:-----:|
-|Videos| 2160P       | ✅    |
-|Videos| 1080P       | ✅    |
-|Videos| 720P        | ✅    |
-|Videos| 480P        | ✅    |
-|Videos| 360P        | ✅    |
-|Videos| back number | ✅    |
-|Images| All         | ✅    |
-<h2>Note</h2>
-♦️ set the token in the header.txt file. (if you want download free content no require)</br>
-from cookies on the website myfans.jp.</br></br>
+Download videos and images from [myfans.jp](https://myfans.jp) that your account can already access.
 
-![Screenshot 2023-11-30 023059](https://github.com/FudgeRK/MyfansVideoDownload/assets/30218389/d1beaf05-bdd7-4ee9-8799-fa7590fce79a)
-![Screenshot 2023-11-30 022826](https://github.com/FudgeRK/MyfansVideoDownload/assets/30218389/04357ec0-b076-4372-8dd1-31f2b9602901)
-Can be found from _mfans_token= or Token token=</br></br>
-♦️ This code run base on python version >= 3.8</br>
-♦️ require FFmpeg</br></br>
+| Content | Support |
+| --- | :---: |
+| Videos 2160p / 1080p / 720p / 480p / 360p | Yes |
+| Back-number videos | Yes |
+| Images | Yes |
+| Quality fallback if a requested resolution is missing | Yes |
 
-## Tutorial video
+## Requirements
 
-<a href="https://vimeo.com/990745787" target="_blank"><img src="https://i.vimeocdn.com/video/1906551049-edd0aa942beaa0f83af9e3c04e3aba98d51253b81bf837967309ec1fb7cac618-d?mw=900&q=85"
-alt="Tutorial video" width="600" height="300" /></a>
+- Python 3.9 or newer
+- [FFmpeg](https://ffmpeg.org/) on your `PATH` (needed for videos)
+- A MyFans account token for paid or members-only posts (optional for free/public posts)
 
+On Windows you can run `SETUP.bat` once to install Python and dependencies, then `MyfansDownloader.bat` to start.
 
-<h2>How to use</h2>
+## Set your token
 
-### Python Usage
+Paid and members-only posts need the `_mfans_token` cookie from myfans.jp after you sign in.
 
-Use your system's terminal</br>
-Go to the main folder of myfans downloader</br>
-first run
-
-```
-python main.py
-```
-
-or
-
-```
-python MyfansDownloader_unified.py
-```
-
-1. Download videos (all posts, a single post ID, or list post IDs). You can choose quality.
-2. Download pictures (require name of creator)
-3. Open the web interface at http://127.0.0.1:5000
-
-Put your token in `header.txt`:
+1. Open [myfans.jp](https://myfans.jp) and log in.
+2. In browser DevTools, copy `_mfans_token`.
+3. Put it in `header.txt` in the project folder (CLI) or in `config/header.txt` (Docker):
 
 ```
 authorization: Token token=YOUR_TOKEN_HERE
-user-agent: Mozilla/5.0
+user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
 ```
 
-You can paste either the full `Token token=...` value or the raw `_mfans_token` cookie.
+You can paste either the raw cookie value or a full `Token token=...` line. Do not commit or share this file.
 
-### Docker Usage
+![Find the token in cookies](https://github.com/FudgeRK/MyfansVideoDownload/assets/30218389/d1beaf05-bdd7-4ee9-8799-fa7590fce79a)
+![Authorization header format](https://github.com/FudgeRK/MyfansVideoDownload/assets/30218389/04357ec0-b076-4372-8dd1-31f2b9602901)
 
-#### Using Docker Compose (Recommended)
+## Tutorial
 
-1. Create the required directories:
+[![Tutorial video](https://i.vimeocdn.com/video/1906551049-edd0aa942beaa0f83af9e3c04e3aba98d51253b81bf837967309ec1fb7cac618-d?mw=900&q=85)](https://vimeo.com/990745787)
+
+## Python usage
+
+From the project folder:
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+`MyfansDownloader_unified.py` is the same menu with an extra CLI / web choice.
+
+| Option | What it does |
+| --- | --- |
+| Download videos | All posts for a creator, a single post ID, or a list of IDs. Quality is selectable. |
+| Download images | All image posts for a creator. |
+| Web interface | Browser UI at http://127.0.0.1:5000 |
+
+Downloads go to `downloads/<creator>/videos` or `downloads/<creator>/images` by default. Filenames and the output folder are set in `config.ini`.
+
+## Docker usage
+
+### Docker Compose
+
 ```bash
 mkdir -p config downloads
-```
-
-2. Put `header.txt` in the `config` directory.
-
-3. Start the container:
-```bash
+# put header.txt in ./config
 docker compose up
 ```
 
-### Using Docker Run
+Open http://localhost:5000. Files are written to `./downloads`.
+
+### Docker run
 
 ```bash
 docker run -it \
   -e FILENAME_PATTERN="{creator}_{date}_{id}" \
   -e FILENAME_SEPARATOR="_" \
   -e THREAD_COUNT="3" \
-  -v $(pwd)/config:/config \
-  -v $(pwd)/downloads:/downloads \
+  -v "$(pwd)/config:/config" \
+  -v "$(pwd)/downloads:/downloads" \
+  -p 5000:5000 \
   frequency2098/myfans-downloader:latest
 ```
 
-## Environment Variables
+## Configuration
 
-| Variable           | Default               | Description                                               |
-|--------------------|-----------------------|-----------------------------------------------------------|
-| FILENAME_PATTERN   | {creator}_{date}_{id} | Pattern for naming downloaded files                       |
-| FILENAME_SEPARATOR | _                     | Separator between filename parts                          |
-| THREAD_COUNT       | 3                     | Number of concurrent post download threads                |
-| WRITE_METADATA     | 0                     | Whether or not to generate gallery-dl style JSON metadata |
-| CONFIG_DIR         | (project folder)      | Where `header.txt` and `config.ini` live                  |
-| DOWNLOADS_DIR      | downloads             | Output directory                                          |
+| Setting | Where | Default |
+| --- | --- | --- |
+| Output folder | `config.ini` `[Settings] output_dir` or `DOWNLOADS_DIR` | `downloads` |
+| Filename pattern | `config.ini` `[Filename] pattern` or `FILENAME_PATTERN` | `{creator}_{date}_{id}` |
+| Filename separator | `config.ini` `[Filename] separator` or `FILENAME_SEPARATOR` | `_` |
+| Post download threads | `config.ini` `[Threads] threads` or `THREAD_COUNT` | `3` |
+| HLS segment threads | `SEGMENT_DOWNLOAD_THREADS` | `8` |
+| JSON metadata | `WRITE_METADATA` (`1` / `0`) | `0` |
+| Auth token | `header.txt` or `AUTH_TOKEN` | empty |
 
 Filename placeholders: `{creator}`, `{date}`, `{id}`, `{title}`.
 
-## Configuration
-
-Place your `header.txt` file in the project folder (CLI) or the `config` directory (Docker).
-
-The web UI Settings page can update the token, filename pattern, and thread count without wiping `config.ini`.
+The web **Settings** page updates the token, filename pattern, and thread count without wiping the rest of `config.ini`.
 
 ## Tests
 
-```
+```bash
 python -m unittest discover -s tests -v
 ```
 
-<h2>🤝 Contributing to Myfans Downloader</h2>
-Any kind of positive contribution is welcome! Please help the project improve by <a href="https://github.com/FudgeRK/MyfansDownloader/pulls" target="_self">opening a pull request</a> with your suggested changes!
+## Contributing
 
-<h2>Special Thanks</h2>
-<a href="https://github.com/Shenggang" target="_self">Shenggang</a>, <a href="https://github.com/bluems" target="_self">bluems</a>, <a href="https://github.com/Serph91P" target="_self">Serph91P</a>, <a href="https://github.com/albertphil" target="_self">albertphil</a>, <a href="https://github.com/mydcxiao" target="_self">0xSho</a>, <a href="https://github.com/Foxtopus" target="_self">Foxtopus</a>
+Bug reports and pull requests are welcome: [open a PR](https://github.com/FudgeRK/MyfansDownloader/pulls).
+
+## Special thanks
+
+[Shenggang](https://github.com/Shenggang), [bluems](https://github.com/bluems), [Serph91P](https://github.com/Serph91P), [albertphil](https://github.com/albertphil), [0xSho](https://github.com/mydcxiao), [Foxtopus](https://github.com/Foxtopus)
