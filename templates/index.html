@@ -14,7 +14,7 @@
                             <option value="images">Images</option>
                         </select>
                     </div>
-                    
+
                     <div class="form-group">
                         <label for="downloadType" class="form-label">Download Mode</label>
                         <select id="downloadType" class="form-select" onchange="toggleInputs()">
@@ -22,24 +22,8 @@
                             <option value="single">Download Single Item</option>
                         </select>
                     </div>
-                </div>
 
-                <div class="col-md-6" id="bulkDownload">
-                    <div class="form-group">
-                        <label for="username" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" placeholder="Enter username (without @)" required>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="download_type" class="form-label">Content Filter</label>
-                        <select id="download_type" class="form-select">
-                            <option value="all">All Posts</option>
-                            <option value="free">Free Posts Only</option>
-                            <option value="subscribed">Subscribed Posts Only</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
+                    <div class="form-group" id="resolutionGroup">
                         <label for="resolution" class="form-label">Video Quality</label>
                         <select id="resolution" name="resolution" class="form-select">
                             <option value="best">Best Available</option>
@@ -48,6 +32,22 @@
                             <option value="hd">720p (HD)</option>
                             <option value="sd">480p (SD)</option>
                             <option value="ld">360p (Low)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="col-md-6" id="bulkDownload">
+                    <div class="form-group">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" placeholder="Enter username (without @)">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="download_type" class="form-label">Content Filter</label>
+                        <select id="download_type" class="form-select">
+                            <option value="all">All Posts</option>
+                            <option value="free">Free Posts Only</option>
+                            <option value="subscribed">Subscribed Posts Only</option>
                         </select>
                     </div>
                 </div>
@@ -61,7 +61,7 @@
             </div>
 
             <div class="form-group mt-3">
-                <button type="submit" class="btn btn-primary">Start Download</button>
+                <button type="submit" class="btn btn-primary" id="startBtn">Start Download</button>
             </div>
         </form>
     </div>
@@ -70,14 +70,14 @@
 <div id="progress" class="progress-log mt-4"></div>
 
 <script>
+    let eventSource = null;
+
     function updateFormOptions() {
         const contentType = document.getElementById('type').value;
         const downloadTypeSelect = document.getElementById('downloadType');
-        const bulkOptionText = contentType === 'videos' ? 'Download All Videos' : 'Download All Images';
-        const singleOptionText = contentType === 'videos' ? 'Download Single Video' : 'Download Single Image';
-        
-        downloadTypeSelect.options[0].text = bulkOptionText;
-        downloadTypeSelect.options[1].text = singleOptionText;
+        downloadTypeSelect.options[0].text = contentType === 'videos' ? 'Download All Videos' : 'Download All Images';
+        downloadTypeSelect.options[1].text = contentType === 'videos' ? 'Download Single Video' : 'Download Single Image';
+        document.getElementById('resolutionGroup').classList.toggle('hidden', contentType !== 'videos');
     }
 
     function toggleInputs() {
@@ -86,39 +86,75 @@
         document.getElementById('singleDownload').classList.toggle('hidden', downloadType === 'bulk');
     }
 
+    function appendLog(text) {
+        const progress = document.getElementById('progress');
+        const timestamp = new Date().toLocaleTimeString();
+        progress.innerHTML += `[${timestamp}] ${text}<br>`;
+        progress.scrollTop = progress.scrollHeight;
+    }
+
     document.getElementById('downloadForm').onsubmit = async (e) => {
         e.preventDefault();
-        const progress = document.getElementById('progress');
-        progress.innerHTML = '';
-        
+        const startBtn = document.getElementById('startBtn');
+        document.getElementById('progress').innerHTML = '';
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+
         const downloadType = document.getElementById('downloadType').value;
         const data = downloadType === 'bulk' ? {
-            username: document.getElementById('username').value,
+            username: document.getElementById('username').value.trim(),
             type: document.getElementById('type').value,
             download_type: document.getElementById('download_type').value,
             resolution: document.getElementById('resolution').value
         } : {
-            post_id: document.getElementById('postId').value,
+            post_id: document.getElementById('postId').value.trim(),
             type: document.getElementById('type').value,
             download_type: 'single',
             resolution: document.getElementById('resolution').value
         };
-        
+
+        if (downloadType === 'bulk' && !data.username) {
+            appendLog('Username is required');
+            return;
+        }
+        if (downloadType === 'single' && !data.post_id) {
+            appendLog('Post ID is required');
+            return;
+        }
+
+        startBtn.disabled = true;
         const response = await fetch('/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ error: response.statusText }));
+            appendLog(error.error || 'Failed to start download');
+            startBtn.disabled = false;
+            return;
+        }
 
-        const events = new EventSource('/progress');
-        events.onmessage = (event) => {
-            const timestamp = new Date().toLocaleTimeString();
-            progress.innerHTML += `[${timestamp}] ${event.data}<br>`;
-            progress.scrollTop = progress.scrollHeight;
+        eventSource = new EventSource('/progress');
+        eventSource.onmessage = (event) => {
+            appendLog(event.data);
+            if (event.data === 'DONE') {
+                eventSource.close();
+                eventSource = null;
+                startBtn.disabled = false;
+            }
+        };
+        eventSource.onerror = () => {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            startBtn.disabled = false;
         };
     };
 
-    // Initialize form options on page load
     document.addEventListener('DOMContentLoaded', () => {
         updateFormOptions();
         loadStatus();
@@ -127,14 +163,11 @@
     async function loadStatus() {
         const response = await fetch('/status');
         const status = await response.json();
-        const progress = document.getElementById('progress');
-        
-        // Display existing downloads
-        Object.entries(status.downloads).forEach(([post_id, info]) => {
-            const timestamp = new Date(info.last_updated).toLocaleTimeString();
-            const progressText = info.segments_total ? 
+        Object.entries(status.downloads || {}).forEach(([post_id, info]) => {
+            const timestamp = info.last_updated ? new Date(info.last_updated).toLocaleTimeString() : '';
+            const progressText = info.segments_total ?
                 `(${info.segments_downloaded}/${info.segments_total} segments)` : '';
-            progress.innerHTML += `[${timestamp}] Post ${post_id}: ${info.status} ${progressText}<br>`;
+            appendLog(`Post ${post_id}: ${info.status} ${progressText}`.trim());
         });
     }
 </script>

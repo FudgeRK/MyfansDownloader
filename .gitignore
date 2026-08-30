@@ -5,3 +5,7 @@
 api_exploration_*.json
 /downloads
 /config
+*.log
+download_state.json
+.pytest_cache/
+ffmpeg.zip

@@ -15,6 +15,12 @@ echo This will install Python and dependencies.
 echo Please wait...
 echo.
 
+python --version >nul 2>&1
+if not errorlevel 1 (
+    echo Python is already installed.
+    goto install_deps
+)
+
 REM Download Python installer
 echo Downloading Python 3.11...
 powershell -Command "$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'python_installer.exe'"
@@ -39,6 +45,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:install_deps
 echo.
 echo Installing dependencies...
 python -m pip install -r requirements.txt -q
@@ -51,7 +58,7 @@ if errorlevel 1 (
 )
 
 REM Clean up
-del python_installer.exe
+if exist python_installer.exe del python_installer.exe
 
 echo.
 echo ========================================

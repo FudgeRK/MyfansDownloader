@@ -10,28 +10,34 @@
                     <div class="col-md-6">
                         <div class="form-group">
                             <label for="filename_pattern" class="form-label">Filename Pattern</label>
-                            <input type="text" class="form-control" id="filename_pattern" 
-                                   placeholder="e.g. {creator}_{date}_{title}">
+                            <input type="text" class="form-control" id="filename_pattern"
+                                   placeholder="e.g. {creator}_{date}_{id}">
                             <small class="text-muted">Available variables: {creator}, {date}, {title}, {id}</small>
                         </div>
-                        
+
                         <div class="form-group">
                             <label for="filename_separator" class="form-label">Filename Separator</label>
-                            <input type="text" class="form-control" id="filename_separator" 
+                            <input type="text" class="form-control" id="filename_separator"
                                    placeholder="_">
                         </div>
                     </div>
-                    
+
                     <div class="col-md-6">
                         <div class="form-group">
                             <label for="auth_token" class="form-label">Auth Token</label>
-                            <input type="password" class="form-control" id="auth_token">
+                            <input type="password" class="form-control" id="auth_token"
+                                   placeholder="Token from _mfans_token cookie">
                         </div>
-                        
+
                         <div class="form-group">
                             <label for="thread_count" class="form-label">Download Threads</label>
-                            <input type="number" class="form-control" id="thread_count" 
+                            <input type="number" class="form-control" id="thread_count"
                                    min="1" max="20">
+                        </div>
+
+                        <div class="form-check mt-3">
+                            <input class="form-check-input" type="checkbox" id="write_metadata">
+                            <label class="form-check-label" for="write_metadata">Write JSON metadata files</label>
                         </div>
                     </div>
                 </div>
@@ -46,32 +52,30 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Load current settings
-    fetch('/settings')
+    fetch('/api/settings')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('filename_pattern').value = data.filename_pattern;
-            document.getElementById('filename_separator').value = data.filename_separator;
-            document.getElementById('auth_token').value = data.auth_token;
-            document.getElementById('thread_count').value = data.thread_count;
+            document.getElementById('filename_pattern').value = data.filename_pattern || '';
+            document.getElementById('filename_separator').value = data.filename_separator || '_';
+            document.getElementById('auth_token').value = data.auth_token || '';
+            document.getElementById('thread_count').value = data.thread_count || 3;
+            const metadata = String(data.write_metadata || '0');
+            document.getElementById('write_metadata').checked = ['1', 'true', 'yes', 'on'].includes(metadata.toLowerCase());
         });
-    
-    // Handle form submission
+
     document.getElementById('settingsForm').addEventListener('submit', function(e) {
         e.preventDefault();
-        
         const settings = {
             filename_pattern: document.getElementById('filename_pattern').value,
             filename_separator: document.getElementById('filename_separator').value,
             auth_token: document.getElementById('auth_token').value,
-            thread_count: parseInt(document.getElementById('thread_count').value)
+            thread_count: parseInt(document.getElementById('thread_count').value, 10) || 3,
+            write_metadata: document.getElementById('write_metadata').checked
         };
-        
-        fetch('/settings', {
+
+        fetch('/api/settings', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings)
         })
         .then(response => response.json())
@@ -79,7 +83,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.status === 'success') {
                 alert('Settings saved successfully!');
             } else {
-                alert('Error saving settings: ' + data.error);
+                alert('Error saving settings: ' + (data.error || 'unknown error'));
             }
         });
     });

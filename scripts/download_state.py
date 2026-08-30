@@ -1,93 +1,108 @@
+"""Persistent download progress used by the web UI."""
+from __future__ import annotations
+
 import json
 import os
+import threading
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from scripts.paths import config_dir, ensure_dir
+
 
 class DownloadState:
-    def __init__(self, state_dir="/config"):
-        self.state_file = os.path.join(state_dir, "download_state.json")
+    def __init__(self, state_dir: Optional[str] = None):
+        directory = Path(state_dir) if state_dir else config_dir()
+        ensure_dir(directory)
+        self.state_file = str(directory / "download_state.json")
+        self._lock = threading.Lock()
         self.state = self._load_state()
-        # Convert completed_files list to set after loading
-        self.state["completed_files"] = set(self.state.get("completed_files", []))
-        self._scan_existing_files()
+        completed = self.state.get("completed_files", [])
+        self.state["completed_files"] = set(completed if isinstance(completed, list) else [])
 
-    def _load_state(self):
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, 'r') as f:
-                    return json.load(f)
-            except json.JSONDecodeError:
-                # If file is corrupted, return default state
-                return self._default_state()
-        return self._default_state()
-
-    def _default_state(self):
+    def _default_state(self) -> Dict[str, Any]:
         return {
             "downloads": {},
             "completed_files": [],
             "failed_files": {},
-            "in_progress": {}
+            "in_progress": {},
         }
 
-    def _scan_existing_files(self):
-        """Scan existing files in downloads directory and add to completed files"""
-        downloads_dir = os.getenv('DOWNLOADS_DIR', '/downloads')
-        if os.path.exists(downloads_dir):
-            for root, _, files in os.walk(downloads_dir):
-                for file in files:
-                    if file.endswith(('.mp4', '.jpg', '.png', '.webp', '.gif')):
-                        self.state["completed_files"].add(file)
-        self.save_state()
+    def _load_state(self) -> Dict[str, Any]:
+        if os.path.exists(self.state_file):
+            try:
+                with open(self.state_file, "r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+                if isinstance(data, dict):
+                    merged = self._default_state()
+                    merged.update(data)
+                    return merged
+            except (json.JSONDecodeError, OSError):
+                return self._default_state()
+        return self._default_state()
 
-    def save_state(self):
-        """Save state to file, converting set to list for JSON serialization"""
+    def save_state(self) -> None:
         try:
-            state_copy = self.get_serializable_state()
-            with open(self.state_file, 'w') as f:
-                json.dump(state_copy, f)
-        except Exception as e:
-            print(f"Error saving state: {e}")
+            parent = os.path.dirname(self.state_file) or "."
+            ensure_dir(Path(parent))
+            with open(self.state_file, "w", encoding="utf-8") as handle:
+                json.dump(self.get_serializable_state(), handle)
+        except OSError as exc:
+            print(f"Error saving state: {exc}")
 
     def add_download(self, post_id, status="pending", segments_total=0, segments_downloaded=0):
-        self.state["downloads"][post_id] = {
-            "status": status,
-            "start_time": datetime.now().isoformat(),
-            "segments_total": segments_total,
-            "segments_downloaded": segments_downloaded,
-            "last_updated": datetime.now().isoformat()
-        }
-        self.save_state()
+        with self._lock:
+            self.state["downloads"][str(post_id)] = {
+                "status": status,
+                "start_time": datetime.now().isoformat(),
+                "segments_total": segments_total,
+                "segments_downloaded": segments_downloaded,
+                "last_updated": datetime.now().isoformat(),
+            }
+            self.save_state()
 
     def update_progress(self, post_id, segments_downloaded):
-        if post_id in self.state["downloads"]:
-            self.state["downloads"][post_id]["segments_downloaded"] = segments_downloaded
-            self.state["downloads"][post_id]["last_updated"] = datetime.now().isoformat()
+        with self._lock:
+            entry = self.state["downloads"].get(str(post_id))
+            if not entry:
+                return
+            entry["segments_downloaded"] = segments_downloaded
+            entry["last_updated"] = datetime.now().isoformat()
             self.save_state()
 
     def mark_completed(self, post_id):
-        if post_id in self.state["downloads"]:
-            self.state["downloads"][post_id]["status"] = "completed"
+        with self._lock:
+            post_id = str(post_id)
+            if post_id in self.state["downloads"]:
+                self.state["downloads"][post_id]["status"] = "completed"
+                self.state["downloads"][post_id]["last_updated"] = datetime.now().isoformat()
             self.state["completed_files"].add(post_id)
             self.save_state()
 
     def mark_failed(self, post_id, error):
-        if post_id in self.state["downloads"]:
-            self.state["downloads"][post_id]["status"] = "failed"
-            self.state["failed_files"][post_id] = error
+        with self._lock:
+            post_id = str(post_id)
+            self.state["downloads"][post_id] = {
+                "status": "failed",
+                "error": str(error),
+                "last_updated": datetime.now().isoformat(),
+            }
+            self.state["failed_files"][post_id] = str(error)
             self.save_state()
 
-    def is_completed(self, post_id):
-        return post_id in self.state["completed_files"]
+    def is_completed(self, post_id) -> bool:
+        return str(post_id) in self.state["completed_files"]
 
-    def get_progress(self, post_id):
-        return self.state["downloads"].get(post_id, {})
+    def get_progress(self, post_id) -> Dict[str, Any]:
+        return self.state["downloads"].get(str(post_id), {})
 
-    def is_file_exists(self, filename):
-        """Check if file already exists in downloads"""
+    def is_file_exists(self, filename: str) -> bool:
         return filename in self.state["completed_files"]
 
-    def get_serializable_state(self):
-        """Return a JSON-serializable version of the state"""
-        state_copy = self.state.copy()
-        if isinstance(state_copy.get("completed_files"), set):
-            state_copy["completed_files"] = list(state_copy["completed_files"])
+    def get_serializable_state(self) -> Dict[str, Any]:
+        state_copy = dict(self.state)
+        completed = state_copy.get("completed_files")
+        if isinstance(completed, set):
+            state_copy["completed_files"] = list(completed)
         return state_copy

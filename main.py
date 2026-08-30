@@ -1,35 +1,55 @@
 import sys
-import subprocess
-from helpers.deps import install_requirements, check_python_version, check_ffmpeg_installed
+
+from helpers.deps import check_ffmpeg_installed, check_python_version, install_requirements
+
 
 def option1():
-    subprocess.run([sys.executable, "scripts/myfans_dl.py"])
+    from scripts.myfans_dl import main as video_main
+
+    video_main()
+
 
 def option2():
-    subprocess.run([sys.executable, "scripts/myfans_image_dl.py"]) 
+    from scripts.myfans_image_dl import main as image_main
+
+    image_main()
+
+
+def option3():
+    from app import app
+
+    print("Starting web server on http://127.0.0.1:5000")
+    print("Press Ctrl+C to stop the server")
+    app.run(host="127.0.0.1", port=5000, debug=False)
+
 
 def main():
-    # Check if the required packages are installed and if ffmpeg is installed.
     if not install_requirements() or not check_ffmpeg_installed():
         sys.exit(1)
 
     options = {
         "1": option1,
-        "2": option2
+        "2": option2,
+        "3": option3,
     }
 
     print("Choose an option:")
     print("1. Download videos")
     print("2. Download images")
+    print("3. Web interface")
 
-    choice = input("Enter your choice (1 or 2): ")
+    choice = input("Enter your choice (1, 2, or 3): ").strip()
     action = options.get(choice)
-
     if action:
         action()
     else:
-        print("Invalid choice. Please enter 1 or 2")
+        print("Invalid choice. Please enter 1, 2, or 3")
+
 
 if __name__ == "__main__":
     if check_python_version():
-        main()
+        try:
+            main()
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            sys.exit(0)

@@ -1,22 +1,21 @@
 services:
   myfans-downloader:
-#    image: frequency2098/myfans-downloader:main
     build: .
     container_name: myfans-downloader
     environment:
       - CONFIG_DIR=/config
       - DOWNLOADS_DIR=/downloads
-      - FILENAME_PATTERN={creator}_{date}_{title}
+      - FILENAME_PATTERN={creator}_{date}_{id}
       - FILENAME_SEPARATOR=_
-      - THREAD_COUNT=10
-      - AUTH_TOKEN=your_token_here
+      - THREAD_COUNT=3
+      - AUTH_TOKEN=
       - LOG_FILE=/config/myfans_downloader.log
-      - SEGMENT_DOWNLOAD_THREADS=15
+      - SEGMENT_DOWNLOAD_THREADS=8
       - WRITE_METADATA=0
     volumes:
       - ./config:/config
       - ./downloads:/downloads
-    user: 1000:1000
+    user: "1000:1000"
     cap_drop:
       - ALL
     ports:
