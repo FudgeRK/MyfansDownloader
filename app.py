@@ -1,149 +1,194 @@
-from flask import Flask, render_template, request, jsonify, Response
-import scripts.myfans_dl as downloader
-from scripts.download_state import DownloadState
-from queue import Queue, Empty  # Add both Queue and Empty
-import threading
+from flask import Flask, Response, jsonify, render_template, request
 import logging
 import os
-import requests
+import threading
 from logging.handlers import RotatingFileHandler
-import configparser
+from queue import Empty, Queue
 
-# Configure Flask logging
-log_dir = os.getenv('CONFIG_DIR', '/config')
-log_file = os.path.join(log_dir, 'myfans_downloader.log')
+import requests
 
-# Ensure log directory exists
-os.makedirs(log_dir, exist_ok=True)
+import scripts.myfans_dl as downloader
+from scripts.api import has_auth_token, read_headers_from_file, write_auth_token
+from scripts.download_state import DownloadState
+from scripts.paths import ensure_dir, log_file_path
+from scripts.settings_loader import current_settings, load_config, save_config
 
-# Configure logging with both file and console handlers
-file_handler = RotatingFileHandler(log_file, maxBytes=10485760, backupCount=5)
+log_path = log_file_path()
+ensure_dir(log_path.parent)
+file_handler = RotatingFileHandler(log_path, maxBytes=10485760, backupCount=5, encoding="utf-8")
 console_handler = logging.StreamHandler()
-
-# Set format for both handlers
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 file_handler.setFormatter(formatter)
 console_handler.setFormatter(formatter)
-
-# Configure root logger
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[file_handler, console_handler]
-)
+logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 progress_queue = Queue()
 download_state = DownloadState()
+download_lock = threading.Lock()
 
-@app.route('/')
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/status')
+
+@app.route("/status")
 def get_status():
     return jsonify(download_state.get_serializable_state())
 
-@app.route('/download', methods=['POST'])
+
+@app.route("/download", methods=["POST"])
 def start_download():
-    data = request.json
-    username = data.get('username')
-    post_type = data.get('type', 'videos')
-    download_type = data.get('download_type', 'all')
-    post_id = data.get('post_id')
-    resolution = data.get('resolution', 'best')
-    
-    logger.info(f"Starting download request - Username: {username}, Type: {post_type}, Mode: {download_type}, PostID: {post_id}, Resolution: {resolution}")
-    
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    post_type = data.get("type", "videos")
+    download_type = data.get("download_type", "all")
+    post_id = (data.get("post_id") or "").strip() or None
+    resolution = data.get("resolution", "best")
+
+    if not post_id and not username:
+        return jsonify({"error": "username or post_id is required"}), 400
+    if not download_lock.acquire(blocking=False):
+        return jsonify({"error": "A download is already in progress"}), 409
+
+    logger.info(
+        "Starting download request - Username: %s, Type: %s, Mode: %s, PostID: %s, Resolution: %s",
+        username,
+        post_type,
+        download_type,
+        post_id,
+        resolution,
+    )
+
     def download_thread():
         try:
-            downloader.start_download(username, post_type, download_type, progress_queue, download_state, post_id=post_id, resolution=resolution)
-        except Exception as e:
-            error = f"Error in download thread: {str(e)}"
-            logger.error(error)
+            downloader.start_download(
+                username,
+                post_type,
+                download_type,
+                progress_queue,
+                download_state,
+                post_id=post_id,
+                resolution=resolution,
+            )
+        except Exception as exc:
+            error = f"Error in download thread: {exc}"
+            logger.exception(error)
             progress_queue.put(error)
-    
-    threading.Thread(target=download_thread).start()
+            progress_queue.put("DONE")
+        finally:
+            download_lock.release()
+
+    threading.Thread(target=download_thread, daemon=True).start()
     return jsonify({"status": "started"})
 
-@app.route('/progress')
+
+@app.route("/progress")
 def progress():
     def generate():
-        while True:
-            try:
-                progress = progress_queue.get(timeout=1)
-                if progress == "DONE":
-                    break
-                yield f"data: {progress}\n\n"
-            except Empty:
-                continue
-            except Exception as e:
-                logger.error(f"Error in progress stream: {e}")
-                break
-    
-    return Response(generate(), mimetype='text/event-stream')
+        try:
+            while True:
+                try:
+                    message = progress_queue.get(timeout=15)
+                    text = str(message).replace("\r", " ").replace("\n", " ")
+                    yield f"data: {text}\n\n"
+                    if message == "DONE":
+                        break
+                except Empty:
+                    yield ": keepalive\n\n"
+        except GeneratorExit:
+            return
+        except Exception as exc:
+            logger.error("Error in progress stream: %s", exc)
 
-@app.route('/test_post/<post_id>')
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/test_post/<post_id>")
 def test_post(post_id):
-    """Test endpoint to check post accessibility and available resolutions"""
     try:
         session = requests.Session()
-        headers = downloader.read_headers_from_file("header.txt")
+        headers = read_headers_from_file("header.txt")
         data, resolution_info, error = downloader.get_video_info(post_id, session, headers)
-        
         if error:
             return jsonify({"error": error}), 400
-            
-        return jsonify({
-            "post_type": "video" if data.get('videos') else "image" if data.get('images') else "unknown",
-            "is_free": data.get('free', False),
-            "is_subscribed": data.get('subscribed', False),
-            "available_resolutions": list(resolution_info.keys()) if resolution_info else [],
-            "title": data.get('title', ''),
-            "created_at": data.get('created_at', '')
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify(
+            {
+                "post_type": "video"
+                if data.get("videos")
+                else "image"
+                if data.get("images")
+                else "unknown",
+                "available": data.get("available", True),
+                "is_free": data.get("free", False),
+                "available_resolutions": list(resolution_info.keys()) if resolution_info else [],
+                "title": data.get("title") or data.get("body", ""),
+                "created_at": data.get("published_at") or data.get("created_at", ""),
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
-@app.route('/settings', methods=['GET', 'POST'])
+
+@app.route("/settings", methods=["GET", "POST"])
 def settings():
-    config = configparser.ConfigParser()
-    config_path = os.path.join(os.getenv('CONFIG_DIR', ''), 'config.ini')
-    
-    if request.method == 'POST':
-        data = request.get_json()
-        
-        config['Settings'] = {
-            'filename_pattern': data.get('filename_pattern', '{creator}_{date}_{title}'),
-            'filename_separator': data.get('filename_separator', '_'),
-            'auth_token': data.get('auth_token', ''),
-            'thread_count': data.get('thread_count', '10')
-        }
-        
-        # Save to config.ini
-        with open(config_path, 'w') as f:
-            config.write(f)
-            
-        # Update environment variables
-        os.environ['FILENAME_PATTERN'] = data.get('filename_pattern', '{creator}_{date}_{title}')
-        os.environ['FILENAME_SEPARATOR'] = data.get('filename_separator', '_')
-        os.environ['AUTH_TOKEN'] = data.get('auth_token', '')
-        os.environ['THREAD_COUNT'] = str(data.get('thread_count', 10))
-        
-        return jsonify({'status': 'success'})
-        
-    # GET request - return current settings
-    try:
-        config.read(config_path)
-        settings = {
-            'filename_pattern': os.getenv('FILENAME_PATTERN', config.get('Settings', 'filename_pattern', fallback='{creator}_{date}_{title}')),
-            'filename_separator': os.getenv('FILENAME_SEPARATOR', config.get('Settings', 'filename_separator', fallback='_')),
-            'auth_token': os.getenv('AUTH_TOKEN', config.get('Settings', 'auth_token', fallback='')),
-            'thread_count': int(os.getenv('THREAD_COUNT', config.get('Settings', 'thread_count', fallback='10')))
-        }
-        return jsonify(settings)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    if request.method == "POST":
+        return settings_api()
+    return render_template("settings.html")
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+
+@app.route("/api/settings", methods=["GET", "POST"])
+def settings_api():
+    config = load_config()
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        if not config.has_section("Filename"):
+            config.add_section("Filename")
+        if not config.has_section("Threads"):
+            config.add_section("Threads")
+        if not config.has_section("Settings"):
+            config.add_section("Settings")
+        config.set("Filename", "pattern", str(data.get("filename_pattern") or "{creator}_{date}_{id}"))
+        config.set("Filename", "separator", str(data.get("filename_separator") or "_"))
+        try:
+            threads = max(1, int(data.get("thread_count") or 3))
+        except (TypeError, ValueError):
+            threads = 3
+        config.set("Threads", "threads", str(threads))
+        if "write_metadata" in data:
+            config.set("Settings", "write_metadata", "1" if data.get("write_metadata") else "0")
+            os.environ["WRITE_METADATA"] = config.get("Settings", "write_metadata")
+        token = (data.get("auth_token") or "").strip()
+        if token:
+            config.set("Settings", "auth_token", token)
+            os.environ["AUTH_TOKEN"] = token
+            try:
+                write_auth_token(token)
+            except OSError as exc:
+                logger.warning("Could not write header.txt: %s", exc)
+        os.environ["FILENAME_PATTERN"] = config.get("Filename", "pattern")
+        os.environ["FILENAME_SEPARATOR"] = config.get("Filename", "separator")
+        os.environ["THREAD_COUNT"] = config.get("Threads", "threads")
+        save_config(config)
+        return jsonify({"status": "success"})
+
+    settings = current_settings(config)
+    token_set = bool(str(settings.get("auth_token") or "").strip())
+    try:
+        headers = read_headers_from_file("header.txt")
+        token_set = token_set or has_auth_token(headers)
+    except FileNotFoundError:
+        pass
+    settings.pop("auth_token", None)
+    settings["auth_token_set"] = token_set
+    return jsonify(settings)
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

@@ -4,8 +4,6 @@ Unified MyfansDownloader - Single Program
 Combines CLI and Web Interface
 """
 import sys
-import subprocess
-import os
 import webbrowser
 import time
 from pathlib import Path
@@ -22,25 +20,32 @@ def run_cli_mode():
         print("MyfansDownloader - CLI Mode")
         print("="*50 + "\n")
         
-        options = {
-            "1": ("Download videos", "scripts/myfans_dl.py"),
-            "2": ("Download images", "scripts/myfans_image_dl.py")
-        }
-        
         print("Choose an option:")
-        for key, (desc, _) in options.items():
-            print(f"{key}. {desc}")
+        print("1. Download videos")
+        print("2. Download images")
         
         choice = input("\nEnter your choice (1 or 2): ").strip()
         
-        if choice in options:
-            _, script_path = options[choice]
-            print(f"\nRunning {options[choice][0]}...\n")
-            subprocess.run([sys.executable, script_path], check=False)
+        if choice == "1":
+            from scripts.myfans_dl import main as video_main
+            print("\nRunning Download videos...\n")
+            _run_cli_entry(video_main)
+        elif choice == "2":
+            from scripts.myfans_image_dl import main as image_main
+            print("\nRunning Download images...\n")
+            _run_cli_entry(image_main)
         else:
             print("Invalid choice. Please enter 1 or 2")
     except Exception as e:
         print(f"Error in CLI mode: {e}")
+
+
+def _run_cli_entry(fn):
+    try:
+        fn()
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            print(f"Stopped with exit code {exc.code}")
 
 def run_web_mode():
     """Run the Flask web server"""
